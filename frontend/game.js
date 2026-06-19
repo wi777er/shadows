@@ -552,10 +552,7 @@ class GameScene extends Phaser.Scene {
         // AI decisions only when aiTimer expires
         bot.aiTimer -= delta;
         if (bot.aiTimer > 0) {
-            // Keep moving toward current target
-            const angle = Math.atan2(bot.targetY - sy, bot.targetX - sx);
-            s.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-            s.setRotation(angle + Math.PI / 2);
+            this.botMove(bot);
             return;
         }
 
@@ -610,8 +607,22 @@ class GameScene extends Phaser.Scene {
         bot.targetX = Phaser.Math.Clamp(bot.targetX, 50, ARENA_WIDTH - 50);
         bot.targetY = Phaser.Math.Clamp(bot.targetY, 50, ARENA_HEIGHT - 50);
 
-        const angle = Math.atan2(bot.targetY - sy, bot.targetX - sx);
-        s.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+        this.botMove(bot);
+    }
+
+    botMove(bot) {
+        const s = bot.sprite;
+        const sx = s.x, sy = s.y;
+        const speed = s.getData('speed');
+        const dx = bot.targetX - sx, dy = bot.targetY - sy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+
+        if (bot.state === 'attack' && dist < BOT_ATTACK_RANGE * 0.9) {
+            s.setVelocity(0, 0);
+        } else {
+            s.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+        }
         s.setRotation(angle + Math.PI / 2);
     }
 
