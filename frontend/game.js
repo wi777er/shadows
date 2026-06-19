@@ -347,7 +347,7 @@ class GameScene extends Phaser.Scene {
                 }
             }
 
-            const rp = this.remotePlayers[pid];
+            rp = this.remotePlayers[pid];
             if (!rp) continue;
             const pdVal = playersData[pid];
             if (!rp.sprite.getData('alive')) {
