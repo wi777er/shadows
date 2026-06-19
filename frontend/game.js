@@ -144,6 +144,12 @@ class GameScene extends Phaser.Scene {
         this.botGroup = null;
         this.playerRespawnTimer = 0;
         this.stunTimer = 0;
+        this.ws = null;
+        this.remotePlayers = {};
+        this.playerId = null;
+        this.lastSentPos = { x: 0, y: 0 };
+        this.wsReconnectTimer = 0;
+        this.sendMoveTimer = 0;
     }
 
     create() {
@@ -198,6 +204,8 @@ class GameScene extends Phaser.Scene {
 
     enterBattle() {
         document.getElementById('battle-overlay').classList.add('hidden');
+        this.playerId = playerData?.id || 'local_' + Date.now();
+        this.connectWs();
         this.botGroup = this.physics.add.group();
         this.createPlayer();
         this.createAttackCone();
@@ -206,6 +214,151 @@ class GameScene extends Phaser.Scene {
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
         this.physics.add.collider(this.player, this.botGroup);
         this.physics.add.collider(this.botGroup, this.botGroup);
+    }
+
+    connectWs() {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        this.ws = new WebSocket(`${proto}//${host}/ws/${this.playerId}`);
+        this.ws.onopen = () => {};
+        this.ws.onmessage = (event) => {
+            try { this.handleWsMessage(JSON.parse(event.data)); }
+            catch (e) { console.warn('WS parse error', e); }
+        };
+        this.ws.onclose = () => {
+            setTimeout(() => { if (this.player) this.connectWs(); }, 3000);
+        };
+    }
+
+    handleWsMessage(msg) {
+        if (msg.type === 'state') {
+            this.updateRemotePlayers(msg.players || {});
+        } else if (msg.type === 'damage') {
+            if (msg.target_id === this.playerId) {
+                this.player.setData('hp', Math.max(0, msg.target_hp));
+                this.damageEffect(this.player, { x: msg.attacker_x || 0, y: msg.attacker_y || 0, body: null });
+                this.updateUI();
+                if (msg.killed) this.playerDeath();
+            }
+            if (msg.attacker_id === this.playerId && msg.killed) {
+                this.player.setData('kills', this.player.getData('kills') + 1);
+                this.updateUI();
+            }
+        } else if (msg.type === 'player_left') {
+            this.removeRemotePlayer(msg.player_id);
+        } else if (msg.type === 'state_change') {
+            this.clearRemotePlayers();
+            for (const bot of this.bots) { bot.label.destroy(); }
+            this.bots = [];
+            if (this.botGroup) this.botGroup.destroy(true);
+            this.botGroup = this.physics.add.group();
+            this.enemyTargets = [];
+            if (this.botGraphics) this.botGraphics.destroy();
+            this.energyFragments = [];
+            this.energyRespawnQueue = [];
+            if (this.energyGraphics) this.energyGraphics.destroy();
+            this.player.setData('level', 1).setData('exp', 0).setData('expToNext', 100);
+            this.player.setData('damage', ATTACK_DAMAGE).setData('speed', PLAYER_SPEED);
+            this.player.setData('maxHp', 100).setData('hp', 100).setData('kills', 0);
+            this.respawnPlayer();
+            this.createEnergyFragments();
+            this.createBots();
+            if (this.attackCone) this.attackCone.destroy();
+            if (this.attackFlash) this.attackFlash.destroy();
+            this.createAttackCone();
+            this.physics.add.collider(this.player, this.botGroup);
+            this.physics.add.collider(this.botGroup, this.botGroup);
+            this.updateUI();
+        }
+    }
+
+    sendWs(data) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(data));
+        }
+    }
+
+    updateRemotePlayers(playersData) {
+        // Remove disconnected players
+        const remoteIds = Object.keys(this.remotePlayers);
+        for (const rid of remoteIds) {
+            if (!playersData[rid]) this.removeRemotePlayer(rid);
+        }
+
+        for (const [pid, pd] of Object.entries(playersData)) {
+            if (pid === this.playerId) continue;
+            let rp = this.remotePlayers[pid];
+            if (!rp) {
+                const x = pd.x || 0, y = pd.y || 0;
+                const s = (PLAYER_RADIUS + 4) * 2;
+                const mid = s / 2;
+                const gfx = this.make.graphics({ add: false });
+                gfx.fillStyle(PLAYER_COLOR, 0.3);
+                gfx.fillCircle(mid, mid, PLAYER_RADIUS + 2);
+                gfx.fillStyle(0x22c55e, 1);
+                gfx.fillCircle(mid, mid, PLAYER_RADIUS);
+                gfx.fillStyle(0x16a34a, 1);
+                gfx.fillCircle(mid, mid, PLAYER_RADIUS - 5);
+                gfx.generateTexture('remote_tex', s, s);
+                gfx.destroy();
+
+                const sprite = this.physics.add.sprite(x, y, 'remote_tex');
+                sprite.body.setCircle(PLAYER_RADIUS, (s / 2) - PLAYER_RADIUS, (s / 2) - PLAYER_RADIUS);
+                sprite.body.moves = false;
+                sprite.setDepth(8);
+                sprite.setData('hp', pd.hp || 100).setData('maxHp', pd.max_hp || 100);
+                sprite.setData('alive', pd.alive !== false);
+
+                const label = this.add.text(x, y - PLAYER_RADIUS - 14, pd.name || '?', {
+                    fontSize: '12px', color: '#22c55e', fontFamily: 'Arial',
+                    stroke: '#000000', strokeThickness: 2,
+                }).setOrigin(0.5).setDepth(9);
+
+                // Check if remote player was attacking us — add to targets
+                this.addTarget(sprite);
+
+                rp = { sprite, label, id: pid };
+                this.remotePlayers[pid] = rp;
+            } else {
+                rp.sprite.setData('hp', pd.hp || 100).setData('maxHp', pd.max_hp || 100);
+                rp.sprite.setData('alive', pd.alive !== false);
+                if (pd.alive === false && rp.sprite.getData('alive') !== false) {
+                    rp.sprite.setVisible(false);
+                    if (rp.sprite.body) rp.sprite.body.enable = false;
+                }
+            }
+
+            const rp = this.remotePlayers[pid];
+            if (!rp) continue;
+            const pdVal = playersData[pid];
+            if (!rp.sprite.getData('alive')) {
+                rp.sprite.setVisible(false);
+                if (rp.sprite.body) rp.sprite.body.enable = false;
+                rp.label.setVisible(false);
+                continue;
+            }
+            rp.sprite.setVisible(true);
+            if (rp.sprite.body) rp.sprite.body.enable = true;
+            rp.label.setVisible(true);
+            rp.sprite.setPosition(pdVal.x, pdVal.y);
+            rp.label.setPosition(pdVal.x, pdVal.y - PLAYER_RADIUS - 14);
+        }
+    }
+
+    removeRemotePlayer(pid) {
+        const rp = this.remotePlayers[pid];
+        if (rp) {
+            this.removeTarget(rp.sprite);
+            rp.sprite.destroy();
+            rp.label.destroy();
+            delete this.remotePlayers[pid];
+        }
+    }
+
+    clearRemotePlayers() {
+        for (const pid of Object.keys(this.remotePlayers)) {
+            this.removeRemotePlayer(pid);
+        }
     }
 
     playerDeath() {
@@ -257,7 +410,6 @@ class GameScene extends Phaser.Scene {
 
     damageEffect(target, attacker) {
         const angle = Math.atan2(target.y - attacker.y, target.x - attacker.x);
-        if (target.body) {
             target.body.setVelocity(
                 Math.cos(angle) * KNOCKBACK_FORCE,
                 Math.sin(angle) * KNOCKBACK_FORCE
@@ -387,42 +539,12 @@ class GameScene extends Phaser.Scene {
     returnToBattle() {
         document.getElementById('death-overlay').classList.add('hidden');
         this.respawnPlayer();
+        this.sendWs({ action: 'respawn' });
     }
 
     changeMap() {
         document.getElementById('death-overlay').classList.add('hidden');
-        for (const bot of this.bots) {
-            bot.sprite.destroy();
-            bot.label.destroy();
-        }
-        this.bots = [];
-        this.enemyTargets = [];
-        this.botGroup = null;
-        this.player.setData('level', 1);
-        this.player.setData('exp', 0);
-        this.player.setData('expToNext', 100);
-        this.player.setData('damage', ATTACK_DAMAGE);
-        this.player.setData('speed', PLAYER_SPEED);
-        this.player.setData('maxHp', 100);
-        this.player.setData('hp', 100);
-        this.player.setData('kills', 0);
-        this.respawnPlayer();
-        this.energyFragments = [];
-        this.energyRespawnQueue = [];
-        if (this.energyGraphics) this.energyGraphics.destroy();
-        if (this.botGraphics) this.botGraphics.destroy();
-        if (this.attackCone) this.attackCone.destroy();
-        if (this.attackFlash) this.attackFlash.destroy();
-        if (this.joystickBase) this.joystickBase.destroy();
-        if (this.joystickThumb) this.joystickThumb.destroy();
-        this.createEnergyFragments();
-        this.createAttackCone();
-        this.createJoystick();
-        this.botGroup = this.physics.add.group();
-        this.createBots();
-        this.physics.add.collider(this.player, this.botGroup);
-        this.physics.add.collider(this.botGroup, this.botGroup);
-        this.updateUI();
+        this.sendWs({ action: 'change_map' });
     }
 
     createPlayer() {
@@ -521,6 +643,13 @@ class GameScene extends Phaser.Scene {
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
             if (Math.abs(diff) <= atkAngle / 2) {
+                // Remote player hit → send to server
+                const rpEntry = Object.entries(this.remotePlayers).find(([, rp]) => rp.sprite === t);
+                if (rpEntry) {
+                    this.sendWs({ action: 'attack', target_id: rpEntry[0], x: this.player.x, y: this.player.y });
+                    this.damageEffect(t, this.player);
+                    continue;
+                }
                 const newHp = t.getData('hp') - dmg;
                 t.setData('hp', newHp);
                 this.damageEffect(t, this.player);
@@ -551,8 +680,8 @@ class GameScene extends Phaser.Scene {
     }
 
     addTarget(sprite) {
-        sprite.setData('hp', sprite.getData('hp') || 50);
-        sprite.setData('alive', true);
+        if (sprite.getData('hp') === undefined) sprite.setData('hp', 50);
+        if (sprite.getData('alive') === undefined) sprite.setData('alive', true);
         this.enemyTargets.push(sprite);
     }
 
@@ -952,7 +1081,19 @@ class GameScene extends Phaser.Scene {
         }
 
         this.drawEnergyFragments();
-        if (this.player.getData('alive')) this.checkEnergyPickup();
+        if (this.player.getData('alive')) {
+            this.checkEnergyPickup();
+            // Send position to server
+            this.sendMoveTimer -= delta;
+            if (this.sendMoveTimer <= 0) {
+                this.sendMoveTimer = 100;
+                const px = this.player.x, py = this.player.y;
+                if (Math.abs(px - this.lastSentPos.x) > 5 || Math.abs(py - this.lastSentPos.y) > 5) {
+                    this.lastSentPos = { x: px, y: py };
+                    this.sendWs({ action: 'move', x: px, y: py, angle: this.facingAngle });
+                }
+            }
+        }
 
         const px = this.player.x, py = this.player.y;
 
@@ -998,6 +1139,23 @@ class GameScene extends Phaser.Scene {
             if (!bot.sprite.getData('alive') && (bot.respawnTimer === undefined || bot.respawnTimer <= 0 || isNaN(bot.respawnTimer))) {
                 bot.respawnTimer = Phaser.Math.Between(BOT_RESPAWN_DELAY.min, BOT_RESPAWN_DELAY.max);
             }
+        }
+        this.drawRemoteBars();
+    }
+
+    drawRemoteBars() {
+        for (const rp of Object.values(this.remotePlayers)) {
+            const s = rp.sprite;
+            if (!s.getData('alive') || !s.visible) continue;
+            const hp = s.getData('hp'), maxHp = s.getData('maxHp');
+            if (maxHp <= 0) continue;
+            const pct = Math.max(0, hp / maxHp);
+            const x = s.x, y = s.y - PLAYER_RADIUS - 8;
+            const w = 30, h = 4;
+            this.energyGraphics.fillStyle(0x000000, 0.6);
+            this.energyGraphics.fillRect(x - w / 2 - 1, y - 1, w + 2, h + 2);
+            this.energyGraphics.fillStyle(0x22c55e, 1);
+            this.energyGraphics.fillRect(x - w / 2, y, w * pct, h);
         }
     }
 
