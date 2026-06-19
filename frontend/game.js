@@ -15,6 +15,14 @@ const ATTACK_COOLDOWN = 800;
 const ATTACK_DAMAGE = 10;
 const ATTACK_FLASH_DURATION = 150;
 
+const ENERGY_FRAGMENTS_COUNT = 100;
+const ENERGY_RADIUS = 6;
+const ENERGY_PICKUP_RANGE = 35;
+const ENERGY_GLOW_RADIUS = 14;
+
+const XP_BASE = 100;
+const XP_SCALE = 50;
+
 const JOYSTICK_BASE_RADIUS = 60;
 const JOYSTICK_THUMB_RADIUS = 25;
 const JOYSTICK_ALPHA = 0.3;
@@ -92,6 +100,10 @@ class GameScene extends Phaser.Scene {
         this.attackTimer = 0;
         this.flashTimer = 0;
         this.enemyTargets = [];
+        this.energyFragments = [];
+        this.energyGraphics = null;
+        this.collectFlashTimer = 0;
+        this.levelUpTimer = 0;
     }
 
     create() {
@@ -99,6 +111,7 @@ class GameScene extends Phaser.Scene {
         this.cameras.main.setBounds(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
         this.createArena();
+        this.createEnergyFragments();
         this.createPlayer();
         this.createAttackCone();
         this.createJoystick();
@@ -144,6 +157,78 @@ class GameScene extends Phaser.Scene {
         g.strokeRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
         g.lineStyle(2, 0x9b59b6, 0.3);
         g.strokeRect(50, 50, ARENA_WIDTH - 100, ARENA_HEIGHT - 100);
+    }
+
+    createEnergyFragments() {
+        for (let i = 0; i < ENERGY_FRAGMENTS_COUNT; i++) {
+            this.energyFragments.push({
+                x: Phaser.Math.Between(100, ARENA_WIDTH - 100),
+                y: Phaser.Math.Between(100, ARENA_HEIGHT - 100),
+                value: Phaser.Math.Between(5, 20),
+            });
+        }
+        this.energyGraphics = this.add.graphics();
+        this.energyGraphics.setDepth(5);
+    }
+
+    drawEnergyFragments() {
+        this.energyGraphics.clear();
+        const t = this.time.now * 0.003;
+
+        for (const frag of this.energyFragments) {
+            const pulse = 1 + Math.sin(t + frag.x * 0.01 + frag.y * 0.01) * 0.15;
+
+            this.energyGraphics.fillStyle(0x8b5cf6, 0.15 * pulse);
+            this.energyGraphics.fillCircle(frag.x, frag.y, ENERGY_GLOW_RADIUS * pulse);
+
+            this.energyGraphics.fillStyle(0xa78bfa, 0.4 * pulse);
+            this.energyGraphics.fillCircle(frag.x, frag.y, ENERGY_RADIUS * pulse + 2);
+
+            this.energyGraphics.fillStyle(0xffffff, 0.5 * pulse);
+            this.energyGraphics.fillCircle(frag.x, frag.y, ENERGY_RADIUS * pulse);
+        }
+    }
+
+    checkEnergyPickup() {
+        const px = this.player.x;
+        const py = this.player.y;
+
+        for (let i = this.energyFragments.length - 1; i >= 0; i--) {
+            const frag = this.energyFragments[i];
+            const dx = px - frag.x;
+            const dy = py - frag.y;
+            if (Math.sqrt(dx * dx + dy * dy) < ENERGY_PICKUP_RANGE) {
+                this.collectFragment(i);
+            }
+        }
+    }
+
+    collectFragment(index) {
+        const frag = this.energyFragments[index];
+        this.energyFragments.splice(index, 1);
+        this.collectFlashTimer = 200;
+
+        let exp = this.player.getData('exp') + frag.value;
+        let level = this.player.getData('level');
+        let expToNext = this.player.getData('expToNext');
+
+        while (exp >= expToNext) {
+            exp -= expToNext;
+            level++;
+            expToNext = XP_BASE + (level - 1) * XP_SCALE;
+
+            const maxHp = this.player.getData('maxHp') + 10;
+            this.player.setData('maxHp', maxHp);
+            this.player.setData('hp', maxHp);
+            this.player.setData('damage', this.player.getData('damage') + 2);
+            this.player.setData('speed', Math.min(300, this.player.getData('speed') + 5));
+            this.levelUpTimer = 500;
+        }
+
+        this.player.setData('exp', exp);
+        this.player.setData('level', level);
+        this.player.setData('expToNext', expToNext);
+        this.updateUI();
     }
 
     createPlayer() {
@@ -434,6 +519,24 @@ class GameScene extends Phaser.Scene {
         if (this.attackTimer <= 0) {
             this.attackTimer = ATTACK_COOLDOWN;
             this.performAttack();
+        }
+
+        this.drawEnergyFragments();
+        this.checkEnergyPickup();
+
+        this.collectFlashTimer -= delta;
+        if (this.collectFlashTimer > 0) {
+            const p = this.collectFlashTimer / 200;
+            this.energyGraphics.fillStyle(0xa78bfa, p * 0.5);
+            this.energyGraphics.fillCircle(px, py, 20 + (1 - p) * 15);
+        }
+
+        if (this.levelUpTimer > 0) {
+            this.levelUpTimer -= delta;
+            const p = this.levelUpTimer / 500;
+            const r = PLAYER_RADIUS + (1 - p) * 20;
+            this.energyGraphics.fillStyle(0x9b59b6, p * 0.3);
+            this.energyGraphics.fillCircle(px, py, r);
         }
     }
 
