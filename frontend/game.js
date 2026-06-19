@@ -127,7 +127,7 @@ function startPhaser() {
 
     try {
         game = new Phaser.Game({
-            type: Phaser.AUTO,
+            type: Phaser.CANVAS,
             width: window.innerWidth,
             height: window.innerHeight,
             parent: 'game-container',
@@ -200,8 +200,12 @@ class GameScene extends Phaser.Scene {
             btn.onclick = () => this.applyUpgrade(btn.dataset.stat);
         });
 
-        this.cursors = this.input.keyboard.createCursorKeys();
-        this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+        this.cursors = null;
+        this.wasd = null;
+        if (this.input.keyboard) {
+            this.cursors = this.input.keyboard.createCursorKeys();
+            this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+        }
         if (this.scale) this.scale.on('resize', this.resize, this);
 
         hideLoading();
