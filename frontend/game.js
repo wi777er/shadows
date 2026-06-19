@@ -9,6 +9,10 @@ const PLAYER_RADIUS = 18;
 const PLAYER_COLOR = 0x9b59b6;
 const PLAYER_SPEED = 200;
 
+const JOYSTICK_BASE_RADIUS = 60;
+const JOYSTICK_THUMB_RADIUS = 25;
+const JOYSTICK_ALPHA = 0.3;
+
 function initTelegram() {
     if (!TG) {
         console.warn('Not running in Telegram');
@@ -63,6 +67,7 @@ function startPhaser() {
             mode: Phaser.Scale.RESIZE,
             autoCenter: Phaser.Scale.CENTER_BOTH,
         },
+        input: { activePointers: 2 },
         scene: [GameScene],
     });
 }
@@ -72,6 +77,10 @@ class GameScene extends Phaser.Scene {
         super('GameScene');
         this.player = null;
         this.playerLabel = null;
+        this.joystick = null;
+        this.joystickActive = false;
+        this.joystickDir = { x: 0, y: 0 };
+        this.facingAngle = 0;
     }
 
     create() {
@@ -80,8 +89,13 @@ class GameScene extends Phaser.Scene {
 
         this.createArena();
         this.createPlayer();
+        this.createJoystick();
 
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+
+        this.input.on('pointerdown', this.onPointerDown, this);
+        this.input.on('pointermove', this.onPointerMove, this);
+        this.input.on('pointerup', this.onPointerUp, this);
 
         hideLoading();
     }
@@ -145,6 +159,86 @@ class GameScene extends Phaser.Scene {
         this.updateUI();
     }
 
+    createJoystick() {
+        const x = 100;
+        const y = this.scale.height - 100;
+
+        this.joystickBase = this.add.graphics();
+        this.joystickBase.setDepth(100);
+        this.joystickBase.setScrollFactor(0);
+        this.drawJoystickBase(x, y);
+
+        this.joystickThumb = this.add.graphics();
+        this.joystickThumb.setDepth(101);
+        this.joystickThumb.setScrollFactor(0);
+        this.drawJoystickThumb(x, y);
+
+        this.joystick = { x, y };
+    }
+
+    drawJoystickBase(x, y) {
+        this.joystickBase.clear();
+        this.joystickBase.fillStyle(0xffffff, JOYSTICK_ALPHA);
+        this.joystickBase.fillCircle(x, y, JOYSTICK_BASE_RADIUS);
+        this.joystickBase.lineStyle(2, 0xffffff, 0.5);
+        this.joystickBase.strokeCircle(x, y, JOYSTICK_BASE_RADIUS);
+    }
+
+    drawJoystickThumb(x, y) {
+        this.joystickThumb.clear();
+        this.joystickThumb.fillStyle(0xffffff, 0.6);
+        this.joystickThumb.fillCircle(x, y, JOYSTICK_THUMB_RADIUS);
+    }
+
+    onPointerDown(pointer) {
+        const dx = pointer.x - this.joystick.x;
+        const dy = pointer.y - this.joystick.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < JOYSTICK_BASE_RADIUS + 40) {
+            this.joystickActive = true;
+            this.updateJoystick(pointer);
+        }
+    }
+
+    onPointerMove(pointer) {
+        if (this.joystickActive && pointer.isDown) {
+            this.updateJoystick(pointer);
+        }
+    }
+
+    onPointerUp() {
+        this.joystickActive = false;
+        this.joystickDir = { x: 0, y: 0 };
+        this.drawJoystickThumb(this.joystick.x, this.joystick.y);
+        this.player.setVelocity(0, 0);
+    }
+
+    updateJoystick(pointer) {
+        let dx = pointer.x - this.joystick.x;
+        let dy = pointer.y - this.joystick.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxDist = JOYSTICK_BASE_RADIUS;
+
+        let clampedDist = Math.min(dist, maxDist);
+        let nx = dx / (dist || 1);
+        let ny = dy / (dist || 1);
+
+        if (dist > maxDist) {
+            dx = nx * maxDist;
+            dy = ny * maxDist;
+        }
+
+        this.drawJoystickThumb(this.joystick.x + dx, this.joystick.y + dy);
+
+        const force = clampedDist / maxDist;
+        this.joystickDir = { x: nx * force, y: ny * force };
+
+        if (dist > 5) {
+            this.facingAngle = Math.atan2(dy, dx);
+        }
+    }
+
     updateUI() {
         const hp = this.player.getData('hp');
         const maxHp = this.player.getData('maxHp');
@@ -170,12 +264,30 @@ class GameScene extends Phaser.Scene {
         if (!this.player) return;
 
         this.playerLabel.setPosition(this.player.x, this.player.y - PLAYER_RADIUS - 14);
+
+        const speed = this.player.getData('speed');
+        this.player.setVelocity(
+            this.joystickDir.x * speed,
+            this.joystickDir.y * speed
+        );
+
+        if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
+            this.player.setRotation(this.facingAngle);
+        }
     }
 
     resize() {
         const w = this.scale.width;
         const h = this.scale.height;
         this.cameras.main.setSize(w, h);
+
+        if (this.joystick) {
+            this.joystick.y = h - 100;
+            this.drawJoystickBase(this.joystick.x, this.joystick.y);
+            if (!this.joystickActive) {
+                this.drawJoystickThumb(this.joystick.x, this.joystick.y);
+            }
+        }
     }
 }
 
