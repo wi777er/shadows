@@ -31,6 +31,7 @@ const BOT_FLEE_HP_RATIO = 0.3;
 const BOT_SEEK_RANGE = 300;
 const BOT_ATTACK_RANGE = 55;
 const BOT_CHASE_RANGE = 300;
+const KNOCKBACK_FORCE = 250;
 
 const XP_BASE = 100;
 const XP_SCALE = 50;
@@ -139,6 +140,9 @@ class GameScene extends Phaser.Scene {
         this.botGraphics = null;
         this.energyRespawnQueue = [];
         this.botNamesUsed = [];
+        this.botGroup = null;
+        this.playerRespawnTimer = 0;
+        this.stunTimer = 0;
     }
 
     create() {
@@ -147,18 +151,13 @@ class GameScene extends Phaser.Scene {
 
         this.createArena();
         this.createEnergyFragments();
-        this.createPlayer();
-        this.createAttackCone();
-        this.createBots();
-        this.createJoystick();
-
-        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
         this.input.on('pointerdown', this.onPointerDown, this);
         this.input.on('pointermove', this.onPointerMove, this);
         this.input.on('pointerup', this.onPointerUp, this);
 
         hideLoading();
+        this.showJoinBattle();
     }
 
     createArena() {
@@ -180,6 +179,77 @@ class GameScene extends Phaser.Scene {
         g.strokeRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
         g.lineStyle(2, 0x9b59b6, 0.3);
         g.strokeRect(50, 50, ARENA_WIDTH - 100, ARENA_HEIGHT - 100);
+    }
+
+    showJoinBattle() {
+        const overlay = document.getElementById('battle-overlay');
+        overlay.classList.remove('hidden');
+        document.getElementById('battle-status').textContent = 'Join the arena';
+        document.getElementById('join-battle-btn').className = '';
+        document.getElementById('join-battle-btn').onclick = () => this.enterBattle();
+    }
+
+    enterBattle() {
+        document.getElementById('battle-overlay').classList.add('hidden');
+        this.botGroup = this.physics.add.group();
+        this.createPlayer();
+        this.createAttackCone();
+        this.createBots();
+        this.createJoystick();
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+        this.physics.add.collider(this.player, this.botGroup);
+        this.physics.add.collider(this.botGroup, this.botGroup);
+    }
+
+    playerDeath() {
+        this.player.setData('alive', false);
+        this.playerRespawnTimer = 5000;
+
+        const overlay = document.getElementById('battle-overlay');
+        overlay.classList.remove('hidden');
+        document.getElementById('join-battle-btn').classList.add('hidden');
+        document.getElementById('battle-status').textContent = 'Respawning in 5s...';
+
+        this.dropEnergyOnDeath(this.player.x, this.player.y);
+
+        this.time.delayedCall(300, () => {
+            this.player.setVisible(false);
+            this.player.body.enable = false;
+            this.playerLabel.setVisible(false);
+            this.attackCone.clear();
+            this.attackFlash.clear();
+            this.flashTimer = 0;
+        });
+    }
+
+    respawnPlayer() {
+        this.player.setData('alive', true);
+        this.player.setData('hp', this.player.getData('maxHp'));
+        this.player.setPosition(
+            Phaser.Math.Between(100, ARENA_WIDTH - 100),
+            Phaser.Math.Between(100, ARENA_HEIGHT - 100)
+        );
+        this.player.setVelocity(0, 0);
+        this.player.setVisible(true);
+        this.player.body.enable = true;
+        this.playerLabel.setVisible(true);
+        this.player.clearTint();
+        this.updateUI();
+    }
+
+    damageEffect(target, attacker) {
+        const angle = Math.atan2(target.y - attacker.y, target.x - attacker.x);
+        if (target.body) {
+            target.body.setVelocity(
+                Math.cos(angle) * KNOCKBACK_FORCE,
+                Math.sin(angle) * KNOCKBACK_FORCE
+            );
+        }
+        if (target === this.player) this.stunTimer = 150;
+        target.setTint(0xff0000);
+        this.time.delayedCall(100, () => {
+            if (target.active) target.clearTint();
+        });
     }
 
     createEnergyFragments() {
@@ -360,6 +430,7 @@ class GameScene extends Phaser.Scene {
             if (Math.abs(diff) <= atkAngle / 2) {
                 const newHp = t.getData('hp') - dmg;
                 t.setData('hp', newHp);
+                this.damageEffect(t, this.player);
                 if (newHp <= 0) {
                     t.setData('alive', false);
                     t.setVisible(false);
@@ -451,6 +522,7 @@ class GameScene extends Phaser.Scene {
         sprite.setData('level', lvl);
         sprite.setData('damage', 3 + lvl * 2);
         sprite.setData('speed', 80 + lvl * 20);
+        if (this.botGroup) this.botGroup.add(sprite);
 
         const label = this.add.text(x, y - BOT_RADIUS - 12, name, {
             fontSize: '11px', color: '#ff6b6b', fontFamily: 'Arial',
@@ -536,14 +608,19 @@ class GameScene extends Phaser.Scene {
                 if (target && target.getData('alive')) {
                     const nhp = target.getData('hp') - s.getData('damage');
                     target.setData('hp', nhp);
-                    if (target === this.player) this.updateUI();
-                    if (nhp <= 0) {
-                        target.setData('alive', false);
-                        target.setVisible(false);
-                        if (target.body) target.body.enable = false;
-                        const deadBot = this.bots.find(b => b.sprite === target);
-                        if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
-                        this.dropEnergyOnDeath(target.x, target.y);
+                    this.damageEffect(target, s);
+                    if (target === this.player) {
+                        this.updateUI();
+                        if (nhp <= 0) this.playerDeath();
+                    } else {
+                        if (nhp <= 0) {
+                            target.setData('alive', false);
+                            target.setVisible(false);
+                            if (target.body) target.body.enable = false;
+                            const deadBot = this.bots.find(b => b.sprite === target);
+                            if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
+                            this.dropEnergyOnDeath(target.x, target.y);
+                        }
                     }
                 }
             }
@@ -690,7 +767,7 @@ class GameScene extends Phaser.Scene {
     }
 
     onPointerDown(pointer) {
-        if (pointer.y < 80) return;
+        if (!this.player || !this.player.getData('alive') || pointer.y < 80) return;
         this.joystick.x = pointer.x;
         this.joystick.y = pointer.y;
         this.drawJoystickBase(pointer.x, pointer.y);
@@ -705,7 +782,7 @@ class GameScene extends Phaser.Scene {
     onPointerUp() {
         this.joystickActive = false;
         this.joystickDir = { x: 0, y: 0 };
-        this.player.setVelocity(0, 0);
+        if (this.player && this.player.body) this.player.setVelocity(0, 0);
         this.joystickBase.clear();
         this.joystickThumb.clear();
     }
@@ -743,39 +820,56 @@ class GameScene extends Phaser.Scene {
     update(time, delta) {
         if (!this.player) return;
 
-        this.playerLabel.setPosition(this.player.x, this.player.y - PLAYER_RADIUS - 14);
+        // Player death/respawn
+        if (!this.player.getData('alive')) {
+            this.playerRespawnTimer -= delta;
+            const msg = Math.ceil(this.playerRespawnTimer / 1000);
+            document.getElementById('battle-status').textContent = `Respawning in ${msg}s...`;
+            if (this.playerRespawnTimer <= 0) {
+                this.respawnPlayer();
+                document.getElementById('battle-overlay').classList.add('hidden');
+            }
+        } else {
+            this.playerLabel.setPosition(this.player.x, this.player.y - PLAYER_RADIUS - 14);
 
-        const speed = this.player.getData('speed');
-        this.player.setVelocity(this.joystickDir.x * speed, this.joystickDir.y * speed);
-        if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
-            this.player.setRotation(this.facingAngle + Math.PI / 2);
-        }
+            const speed = this.player.getData('speed');
+            if (this.stunTimer > 0) {
+                this.stunTimer -= delta;
+            } else {
+                this.player.setVelocity(this.joystickDir.x * speed, this.joystickDir.y * speed);
+                if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
+                    this.player.setRotation(this.facingAngle + Math.PI / 2);
+                }
+            }
 
-        const px = this.player.x, py = this.player.y;
+            const px = this.player.x, py = this.player.y;
 
-        const atkRange = this.player.getData('atkRange');
-        const atkAngle = this.player.getData('atkAngle');
-        this.drawCone(this.attackCone, px, py, this.facingAngle, atkRange, atkAngle, 1);
-
-        if (this.flashTimer > 0) {
-            this.flashTimer -= delta;
             const atkRange = this.player.getData('atkRange');
             const atkAngle = this.player.getData('atkAngle');
-            const atkFlashDuration = this.player.getData('atkFlashDuration');
-            const p = 1 - this.flashTimer / atkFlashDuration;
-            this.drawFlash(this.attackFlash, px, py, this.facingAngle, atkRange, atkAngle, Math.min(1, Math.max(0, p)));
-        } else {
-            this.attackFlash.clear();
-        }
+            this.drawCone(this.attackCone, px, py, this.facingAngle, atkRange, atkAngle, 1);
 
-        this.attackTimer -= delta;
-        if (this.attackTimer <= 0) {
-            this.attackTimer = this.player.getData('atkCooldown');
-            this.performAttack();
+            if (this.flashTimer > 0) {
+                this.flashTimer -= delta;
+                const atkRange = this.player.getData('atkRange');
+                const atkAngle = this.player.getData('atkAngle');
+                const atkFlashDuration = this.player.getData('atkFlashDuration');
+                const p = 1 - this.flashTimer / atkFlashDuration;
+                this.drawFlash(this.attackFlash, px, py, this.facingAngle, atkRange, atkAngle, Math.min(1, Math.max(0, p)));
+            } else {
+                this.attackFlash.clear();
+            }
+
+            this.attackTimer -= delta;
+            if (this.attackTimer <= 0) {
+                this.attackTimer = this.player.getData('atkCooldown');
+                this.performAttack();
+            }
         }
 
         this.drawEnergyFragments();
-        this.checkEnergyPickup();
+        if (this.player.getData('alive')) this.checkEnergyPickup();
+
+        const px = this.player.x, py = this.player.y;
 
         this.collectFlashTimer -= delta;
         if (this.collectFlashTimer > 0) {
