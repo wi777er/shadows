@@ -20,6 +20,19 @@
             <p id="battle-status">Join the arena</p>
             <button id="join-battle-btn">⚔️ Join Battle</button>
         </div>
+        <div id="death-overlay" class="hidden">
+            <h2>💀 You Died</h2>
+            <p id="death-info">Level 1 | Kills: 0</p>
+            <button id="return-btn">🔄 Return</button>
+            <button id="change-map-btn">🌍 Change Map</button>
+        </div>
+        <div id="upgrade-overlay" class="hidden">
+            <h2>⬆️ Level Up!</h2>
+            <p>Choose upgrade:</p>
+            <button class="upgrade-btn" data-stat="damage">🗡️ +5 Damage</button>
+            <button class="upgrade-btn" data-stat="maxHp">💜 +25 Max HP</button>
+            <button class="upgrade-btn" data-stat="speed">💨 +15 Speed</button>
+        </div>
         <div id="ui-overlay">
             <div id="top-bar">
                 <div id="player-info">

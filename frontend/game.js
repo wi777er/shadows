@@ -35,6 +35,7 @@ const KNOCKBACK_FORCE = 250;
 
 const XP_BASE = 100;
 const XP_SCALE = 50;
+const XP_PER_KILL = 25;
 
 const JOYSTICK_BASE_RADIUS = 60;
 const JOYSTICK_THUMB_RADIUS = 25;
@@ -156,6 +157,12 @@ class GameScene extends Phaser.Scene {
         this.input.on('pointermove', this.onPointerMove, this);
         this.input.on('pointerup', this.onPointerUp, this);
 
+        document.getElementById('return-btn').onclick = () => this.returnToBattle();
+        document.getElementById('change-map-btn').onclick = () => this.changeMap();
+        document.querySelectorAll('.upgrade-btn').forEach(btn => {
+            btn.onclick = () => this.applyUpgrade(btn.dataset.stat);
+        });
+
         hideLoading();
         this.showJoinBattle();
     }
@@ -203,16 +210,16 @@ class GameScene extends Phaser.Scene {
 
     playerDeath() {
         this.player.setData('alive', false);
-        this.playerRespawnTimer = 5000;
+        this.player.setVelocity(0, 0);
 
-        const overlay = document.getElementById('battle-overlay');
+        const overlay = document.getElementById('death-overlay');
         overlay.classList.remove('hidden');
-        document.getElementById('join-battle-btn').classList.add('hidden');
-        document.getElementById('battle-status').textContent = 'Respawning in 5s...';
+        document.getElementById('death-info').textContent =
+            `Level ${this.player.getData('level')} | Kills: ${this.player.getData('kills')}`;
 
         this.dropEnergyOnDeath(this.player.x, this.player.y);
 
-        this.time.delayedCall(300, () => {
+        this.time.delayedCall(500, () => {
             this.player.setVisible(false);
             this.player.body.enable = false;
             this.playerLabel.setVisible(false);
@@ -306,29 +313,100 @@ class GameScene extends Phaser.Scene {
 
         if (collector === this.player || !collector) {
             this.collectFlashTimer = 200;
-            this.addExp(frag.value);
+            this.addExp(frag.value, this.player);
+        } else if (collector.getData) {
+            this.botAddExp(collector, frag.value);
         }
     }
 
-    addExp(amount) {
-        let exp = this.player.getData('exp') + amount;
-        let level = this.player.getData('level');
-        let expToNext = this.player.getData('expToNext');
+    addExp(amount, who) {
+        let exp = who.getData('exp') + amount;
+        let level = who.getData('level');
+        let expToNext = who.getData('expToNext');
 
         while (exp >= expToNext) {
             exp -= expToNext;
             level++;
             expToNext = XP_BASE + (level - 1) * XP_SCALE;
-            this.player.setData('maxHp', this.player.getData('maxHp') + 10);
-            this.player.setData('hp', this.player.getData('maxHp'));
-            this.player.setData('damage', this.player.getData('damage') + 2);
-            this.player.setData('speed', Math.min(300, this.player.getData('speed') + 5));
             this.levelUpTimer = 500;
+            if (level % 5 === 0) this.showUpgradeChoice();
         }
 
-        this.player.setData('exp', exp);
-        this.player.setData('level', level);
-        this.player.setData('expToNext', expToNext);
+        who.setData('exp', exp);
+        who.setData('level', level);
+        who.setData('expToNext', expToNext);
+        if (who === this.player) this.updateUI();
+    }
+
+    botAddExp(sprite, amount) {
+        let exp = (sprite.getData('exp') || 0) + amount;
+        let level = sprite.getData('level');
+        let expToNext = sprite.getData('expToNext');
+
+        while (exp >= expToNext) {
+            exp -= expToNext;
+            level++;
+            expToNext = XP_BASE + (level - 1) * XP_SCALE;
+            if (level % 5 === 0) this.botLevelUp(sprite);
+        }
+
+        sprite.setData('exp', exp);
+        sprite.setData('level', level);
+        sprite.setData('expToNext', expToNext);
+    }
+
+    botLevelUp(sprite) {
+        const stats = ['damage', 'maxHp', 'speed'];
+        const stat = stats[Math.floor(Math.random() * stats.length)];
+        if (stat === 'damage') sprite.setData('damage', sprite.getData('damage') + 5);
+        else if (stat === 'maxHp') {
+            sprite.setData('maxHp', sprite.getData('maxHp') + 25);
+            sprite.setData('hp', sprite.getData('maxHp'));
+        } else if (stat === 'speed') sprite.setData('speed', Math.min(300, sprite.getData('speed') + 15));
+    }
+
+    showUpgradeChoice() {
+        document.getElementById('upgrade-overlay').classList.remove('hidden');
+    }
+
+    returnToBattle() {
+        document.getElementById('death-overlay').classList.add('hidden');
+        this.respawnPlayer();
+    }
+
+    changeMap() {
+        document.getElementById('death-overlay').classList.add('hidden');
+        for (const bot of this.bots) {
+            bot.sprite.destroy();
+            bot.label.destroy();
+        }
+        this.bots = [];
+        this.enemyTargets = [];
+        this.botGroup = null;
+        this.player.setData('level', 1);
+        this.player.setData('exp', 0);
+        this.player.setData('expToNext', 100);
+        this.player.setData('damage', ATTACK_DAMAGE);
+        this.player.setData('speed', PLAYER_SPEED);
+        this.player.setData('maxHp', 100);
+        this.player.setData('hp', 100);
+        this.player.setData('kills', 0);
+        this.respawnPlayer();
+        this.energyFragments = [];
+        this.energyRespawnQueue = [];
+        if (this.energyGraphics) this.energyGraphics.destroy();
+        if (this.botGraphics) this.botGraphics.destroy();
+        if (this.attackCone) this.attackCone.destroy();
+        if (this.attackFlash) this.attackFlash.destroy();
+        if (this.joystickBase) this.joystickBase.destroy();
+        if (this.joystickThumb) this.joystickThumb.destroy();
+        this.createEnergyFragments();
+        this.createAttackCone();
+        this.createJoystick();
+        this.botGroup = this.physics.add.group();
+        this.createBots();
+        this.physics.add.collider(this.player, this.botGroup);
+        this.physics.add.collider(this.botGroup, this.botGroup);
         this.updateUI();
     }
 
@@ -438,6 +516,7 @@ class GameScene extends Phaser.Scene {
                     const deadBot = this.bots.find(b => b.sprite === t);
                     if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
                     this.player.setData('kills', this.player.getData('kills') + 1);
+                    this.addExp(XP_PER_KILL, this.player);
                     this.updateUI();
                     this.dropEnergyOnDeath(t.x, t.y);
                 }
@@ -490,8 +569,6 @@ class GameScene extends Phaser.Scene {
             attempts++;
         } while (used.has(name) && attempts < 100);
 
-        const lvl = Phaser.Math.Between(1, Math.min(3, this.player.getData('level') + 1));
-
         if (!this.textures.exists('bot_tex')) {
             const s = (BOT_RADIUS + 6) * 2;
             const gfx = this.make.graphics({ add: false });
@@ -516,12 +593,13 @@ class GameScene extends Phaser.Scene {
         sprite.body.setCircle(BOT_RADIUS, (s / 2) - BOT_RADIUS, (s / 2) - BOT_RADIUS);
         sprite.body.setCollideWorldBounds(true);
         sprite.setDepth(5);
-        sprite.setData('hp', 30 + lvl * 20);
-        sprite.setData('maxHp', 30 + lvl * 20);
+        sprite.setData('hp', 100);
+        sprite.setData('maxHp', 100);
         sprite.setData('alive', true);
-        sprite.setData('level', lvl);
-        sprite.setData('damage', 3 + lvl * 2);
-        sprite.setData('speed', 80 + lvl * 20);
+        sprite.setData('level', 1);
+        sprite.setData('damage', ATTACK_DAMAGE);
+        sprite.setData('speed', PLAYER_SPEED);
+        sprite.setData('exp', 0).setData('expToNext', XP_BASE);
         if (this.botGroup) this.botGroup.add(sprite);
 
         const label = this.add.text(x, y - BOT_RADIUS - 12, name, {
@@ -611,7 +689,10 @@ class GameScene extends Phaser.Scene {
                     this.damageEffect(target, s);
                     if (target === this.player) {
                         this.updateUI();
-                        if (nhp <= 0) this.playerDeath();
+                        if (nhp <= 0) {
+                            this.botAddExp(s, XP_PER_KILL);
+                            this.playerDeath();
+                        }
                     } else {
                         if (nhp <= 0) {
                             target.setData('alive', false);
@@ -619,6 +700,7 @@ class GameScene extends Phaser.Scene {
                             if (target.body) target.body.enable = false;
                             const deadBot = this.bots.find(b => b.sprite === target);
                             if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
+                            this.botAddExp(s, XP_PER_KILL);
                             this.dropEnergyOnDeath(target.x, target.y);
                         }
                     }
@@ -710,14 +792,7 @@ class GameScene extends Phaser.Scene {
         for (let i = this.energyFragments.length - 1; i >= 0; i--) {
             const frag = this.energyFragments[i];
             if (Phaser.Math.Distance.Between(s.x, s.y, frag.x, frag.y) < ENERGY_PICKUP_RANGE) {
-                this.energyFragments.splice(i, 1);
-                this.energyRespawnQueue.push({
-                    delay: Phaser.Math.Between(ENERGY_RESPAWN_DELAY.min, ENERGY_RESPAWN_DELAY.max),
-                    timer: 0,
-                });
-                let exp = s.getData('exp') || 0;
-                exp += frag.value;
-                s.setData('exp', exp);
+                this.collectFragment(i, s);
                 break;
             }
         }
@@ -820,15 +895,9 @@ class GameScene extends Phaser.Scene {
     update(time, delta) {
         if (!this.player) return;
 
-        // Player death/respawn
+        // Player death overlay visible — game still runs
         if (!this.player.getData('alive')) {
-            this.playerRespawnTimer -= delta;
-            const msg = Math.ceil(this.playerRespawnTimer / 1000);
-            document.getElementById('battle-status').textContent = `Respawning in ${msg}s...`;
-            if (this.playerRespawnTimer <= 0) {
-                this.respawnPlayer();
-                document.getElementById('battle-overlay').classList.add('hidden');
-            }
+            // Skip player logic, bots/energy still process below
         } else {
             this.playerLabel.setPosition(this.player.x, this.player.y - PLAYER_RADIUS - 14);
 
