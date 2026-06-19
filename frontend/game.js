@@ -2,6 +2,9 @@ const TG = window.Telegram?.WebApp;
 let playerData = null;
 let game = null;
 
+const ARENA_WIDTH = 3000;
+const ARENA_HEIGHT = 3000;
+
 function initTelegram() {
     if (!TG) {
         console.warn('Not running in Telegram');
@@ -47,7 +50,11 @@ function startPhaser() {
         width: window.innerWidth,
         height: window.innerHeight,
         parent: 'game-container',
-        backgroundColor: '#1a1a2e',
+        backgroundColor: '#0a0a0a',
+        physics: {
+            default: 'arcade',
+            arcade: { gravity: { y: 0 }, debug: false },
+        },
         scale: {
             mode: Phaser.Scale.RESIZE,
             autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -62,22 +69,37 @@ class GameScene extends Phaser.Scene {
     }
 
     create() {
-        const w = this.scale.width;
-        const h = this.scale.height;
+        this.physics.world.setBounds(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+        this.cameras.main.setBounds(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
-        this.add.text(w / 2, h / 2 - 20, 'Shadow Survivor', {
-            fontSize: '32px', color: '#9b59b6', fontFamily: 'Arial'
-        }).setOrigin(0.5);
-
-        this.add.text(w / 2, h / 2 + 30, 'Phaser 3 loaded', {
-            fontSize: '18px', color: '#666', fontFamily: 'Arial'
-        }).setOrigin(0.5);
-
-        this.add.text(w / 2, h / 2 + 70, `Player: ${playerData?.first_name || '???'}`, {
-            fontSize: '16px', color: '#888', fontFamily: 'Arial'
-        }).setOrigin(0.5);
+        this.createArena();
+        this.cameras.main.setScroll(ARENA_WIDTH / 2 - this.scale.width / 2, ARENA_HEIGHT / 2 - this.scale.height / 2);
 
         hideLoading();
+    }
+
+    createArena() {
+        const g = this.add.graphics();
+
+        g.fillStyle(0x16213e, 1);
+        g.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+
+        g.lineStyle(1, 0x1a1a3e, 0.3);
+        for (let x = 0; x <= ARENA_WIDTH; x += 100) {
+            g.moveTo(x, 0);
+            g.lineTo(x, ARENA_HEIGHT);
+        }
+        for (let y = 0; y <= ARENA_HEIGHT; y += 100) {
+            g.moveTo(0, y);
+            g.lineTo(ARENA_WIDTH, y);
+        }
+        g.strokePath();
+
+        g.lineStyle(4, 0x9b59b6, 0.8);
+        g.strokeRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+
+        g.lineStyle(2, 0x9b59b6, 0.3);
+        g.strokeRect(50, 50, ARENA_WIDTH - 100, ARENA_HEIGHT - 100);
     }
 
     resize() {
