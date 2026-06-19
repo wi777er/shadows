@@ -11,6 +11,9 @@ const PLAYER_SPEED = 200;
 
 const ATTACK_RANGE = 60;
 const ATTACK_ANGLE = Math.PI * 2 / 3;
+const ATTACK_COOLDOWN = 800;
+const ATTACK_DAMAGE = 10;
+const ATTACK_FLASH_DURATION = 150;
 
 const JOYSTICK_BASE_RADIUS = 60;
 const JOYSTICK_THUMB_RADIUS = 25;
@@ -81,10 +84,14 @@ class GameScene extends Phaser.Scene {
         this.player = null;
         this.playerLabel = null;
         this.attackCone = null;
+        this.attackFlash = null;
         this.joystick = null;
         this.joystickActive = false;
         this.joystickDir = { x: 0, y: 0 };
         this.facingAngle = 0;
+        this.attackTimer = 0;
+        this.flashTimer = 0;
+        this.enemyTargets = [];
     }
 
     create() {
@@ -164,7 +171,7 @@ class GameScene extends Phaser.Scene {
         this.player.setData('level', 1);
         this.player.setData('exp', 0);
         this.player.setData('expToNext', 100);
-        this.player.setData('damage', 10);
+        this.player.setData('damage', ATTACK_DAMAGE);
         this.player.setData('speed', PLAYER_SPEED);
         this.player.setData('kills', 0);
 
@@ -179,45 +186,118 @@ class GameScene extends Phaser.Scene {
     createAttackCone() {
         this.attackCone = this.add.graphics();
         this.attackCone.setDepth(9);
+
+        this.attackFlash = this.add.graphics();
+        this.attackFlash.setDepth(9);
     }
 
-    drawAttackCone() {
-        this.attackCone.clear();
-
-        const px = this.player.x;
-        const py = this.player.y;
-        const angle = this.facingAngle;
+    drawCone(graphics, px, py, angle, alpha) {
+        graphics.clear();
         const halfAngle = ATTACK_ANGLE / 2;
 
-        this.attackCone.fillStyle(0x9b59b6, 0.12);
-        this.attackCone.beginPath();
-        this.attackCone.moveTo(px, py);
-        this.attackCone.lineTo(
+        graphics.fillStyle(0x9b59b6, alpha * 0.12);
+        graphics.beginPath();
+        graphics.moveTo(px, py);
+        graphics.lineTo(
             px + Math.cos(angle - halfAngle) * ATTACK_RANGE,
             py + Math.sin(angle - halfAngle) * ATTACK_RANGE
         );
-        this.attackCone.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
-        this.attackCone.closePath();
-        this.attackCone.fillPath();
+        graphics.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
+        graphics.closePath();
+        graphics.fillPath();
 
-        this.attackCone.lineStyle(2, 0x9b59b6, 0.35);
-        this.attackCone.beginPath();
-        this.attackCone.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
-        this.attackCone.strokePath();
+        graphics.lineStyle(2, 0x9b59b6, alpha * 0.35);
+        graphics.beginPath();
+        graphics.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
+        graphics.strokePath();
 
-        this.attackCone.lineStyle(1, 0x9b59b6, 0.25);
-        this.attackCone.beginPath();
-        this.attackCone.moveTo(px, py);
-        this.attackCone.lineTo(
-            px + Math.cos(angle - halfAngle) * ATTACK_RANGE,
-            py + Math.sin(angle - halfAngle) * ATTACK_RANGE
+        graphics.lineStyle(1, 0x9b59b6, alpha * 0.25);
+        graphics.beginPath();
+        graphics.moveTo(px, py);
+        graphics.lineTo(px + Math.cos(angle - halfAngle) * ATTACK_RANGE, py + Math.sin(angle - halfAngle) * ATTACK_RANGE);
+        graphics.moveTo(px, py);
+        graphics.lineTo(px + Math.cos(angle + halfAngle) * ATTACK_RANGE, py + Math.sin(angle + halfAngle) * ATTACK_RANGE);
+        graphics.strokePath();
+    }
+
+    drawFlash(graphics, px, py, angle, progress) {
+        graphics.clear();
+        const halfAngle = ATTACK_ANGLE / 2;
+        const alpha = 1 - progress;
+        const r = ATTACK_RANGE * (1 + progress * 0.3);
+
+        graphics.fillStyle(0xffffff, alpha * 0.4);
+        graphics.beginPath();
+        graphics.moveTo(px, py);
+        graphics.lineTo(
+            px + Math.cos(angle - halfAngle) * r,
+            py + Math.sin(angle - halfAngle) * r
         );
-        this.attackCone.moveTo(px, py);
-        this.attackCone.lineTo(
-            px + Math.cos(angle + halfAngle) * ATTACK_RANGE,
-            py + Math.sin(angle + halfAngle) * ATTACK_RANGE
-        );
-        this.attackCone.strokePath();
+        graphics.arc(px, py, r, angle - halfAngle, angle + halfAngle, false);
+        graphics.closePath();
+        graphics.fillPath();
+
+        graphics.lineStyle(3, 0xffffff, alpha * 0.6);
+        graphics.beginPath();
+        graphics.arc(px, py, r, angle - halfAngle, angle + halfAngle, false);
+        graphics.strokePath();
+    }
+
+    performAttack() {
+        const px = this.player.x;
+        const py = this.player.y;
+        const dmg = this.player.getData('damage');
+
+        this.flashTimer = ATTACK_FLASH_DURATION;
+
+        for (let i = this.enemyTargets.length - 1; i >= 0; i--) {
+            const target = this.enemyTargets[i];
+            if (!target.active || !target.getData('alive')) continue;
+
+            const dx = target.x - px;
+            const dy = target.y - py;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist > ATTACK_RANGE) continue;
+
+            let angleToTarget = Math.atan2(dy, dx);
+            let diff = angleToTarget - this.facingAngle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+
+            if (Math.abs(diff) <= ATTACK_ANGLE / 2) {
+                const newHp = target.getData('hp') - dmg;
+                target.setData('hp', newHp);
+                if (newHp <= 0) {
+                    target.setData('alive', false);
+                }
+            }
+        }
+    }
+
+    isInAttackCone(x, y) {
+        const dx = x - this.player.x;
+        const dy = y - this.player.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > ATTACK_RANGE) return false;
+
+        let angleToTarget = Math.atan2(dy, dx);
+        let diff = angleToTarget - this.facingAngle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+
+        return Math.abs(diff) <= ATTACK_ANGLE / 2;
+    }
+
+    addTarget(sprite) {
+        if (!sprite.getData('hp')) sprite.setData('hp', 50);
+        if (!sprite.getData('alive')) sprite.setData('alive', true);
+        this.enemyTargets.push(sprite);
+    }
+
+    removeTarget(sprite) {
+        const idx = this.enemyTargets.indexOf(sprite);
+        if (idx !== -1) this.enemyTargets.splice(idx, 1);
     }
 
     createJoystick() {
@@ -321,7 +401,7 @@ class GameScene extends Phaser.Scene {
         document.getElementById('kill-counter').textContent = `Kills: ${kills}`;
     }
 
-    update() {
+    update(time, delta) {
         if (!this.player) return;
 
         this.playerLabel.setPosition(this.player.x, this.player.y - PLAYER_RADIUS - 14);
@@ -336,7 +416,25 @@ class GameScene extends Phaser.Scene {
             this.player.setRotation(this.facingAngle + Math.PI / 2);
         }
 
-        this.drawAttackCone();
+        const px = this.player.x;
+        const py = this.player.y;
+        const angle = this.facingAngle;
+
+        this.drawCone(this.attackCone, px, py, angle, 1);
+
+        if (this.flashTimer > 0) {
+            this.flashTimer -= delta;
+            const progress = 1 - this.flashTimer / ATTACK_FLASH_DURATION;
+            this.drawFlash(this.attackFlash, px, py, angle, Math.min(1, Math.max(0, progress)));
+        } else {
+            this.attackFlash.clear();
+        }
+
+        this.attackTimer -= delta;
+        if (this.attackTimer <= 0) {
+            this.attackTimer = ATTACK_COOLDOWN;
+            this.performAttack();
+        }
     }
 
     resize() {
