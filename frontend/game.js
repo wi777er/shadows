@@ -2,6 +2,12 @@ const TG = window.Telegram?.WebApp;
 let playerData = null;
 let game = null;
 
+window.onerror = function (msg, url, line) {
+    const el = document.getElementById('loading-screen');
+    if (el) el.innerHTML = '<h1 style="color:#e74c3c">JS Error</h1><pre style="color:#fff;padding:20px;text-align:left;white-space:pre-wrap">' + msg + ' (line ' + line + ')</pre>';
+    return true;
+};
+
 const ARENA_WIDTH = 3000;
 const ARENA_HEIGHT = 3000;
 
@@ -103,20 +109,27 @@ function startPhaser() {
     const container = document.getElementById('game-container');
     if (!container) return;
 
-    game = new Phaser.Game({
-        type: Phaser.AUTO,
-        width: window.innerWidth,
-        height: window.innerHeight,
-        parent: 'game-container',
-        backgroundColor: '#0a0a0a',
-        physics: {
-            default: 'arcade',
-            arcade: { gravity: { y: 0 }, debug: false },
-        },
-        scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
-        input: { activePointers: 2 },
-        scene: [GameScene],
-    });
+    try {
+        game = new Phaser.Game({
+            type: Phaser.AUTO,
+            width: window.innerWidth,
+            height: window.innerHeight,
+            parent: 'game-container',
+            backgroundColor: '#0a0a0a',
+            physics: {
+                default: 'arcade',
+                arcade: { gravity: { y: 0 }, debug: false },
+            },
+            scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+            input: { activePointers: 2 },
+            scene: [GameScene],
+        });
+    } catch (e) {
+        console.error('Phaser init error:', e);
+        document.getElementById('loading-screen').innerHTML =
+            '<h1 style="color:#e74c3c">Error</h1><p style="color:#fff;font-size:14px;padding:20px">' +
+            e.message + '</p>';
+    }
 }
 
 class GameScene extends Phaser.Scene {
