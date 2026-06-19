@@ -252,7 +252,11 @@ class GameScene extends Phaser.Scene {
                 Math.sin(angle) * KNOCKBACK_FORCE
             );
         }
-        if (target === this.player) this.stunTimer = 150;
+        if (target === this.player) {
+            this.stunTimer = 150;
+        } else {
+            target.setData('stunTimer', 150);
+        }
         target.setTint(0xff0000);
         this.time.delayedCall(100, () => {
             if (target.active) target.clearTint();
@@ -771,6 +775,7 @@ class GameScene extends Phaser.Scene {
 
     botMove(bot) {
         const s = bot.sprite;
+        if (s.getData('stunTimer') > 0) { s.setVelocity(0, 0); return; }
         const sx = s.x, sy = s.y;
         const speed = s.getData('speed');
         const dx = bot.targetX - sx, dy = bot.targetY - sy;
@@ -971,6 +976,8 @@ class GameScene extends Phaser.Scene {
                 }
                 continue;
             }
+            const stun = bot.sprite.getData('stunTimer') || 0;
+            if (stun > 0) bot.sprite.setData('stunTimer', Math.max(0, stun - delta));
             this.updateBotAI(bot, delta);
             this.updateBotEnergyPickup(bot);
         }
