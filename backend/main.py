@@ -1,13 +1,15 @@
 import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from database import init_db, save_player
-from game import Game
+from backend.database import init_db, save_player
+from backend.game import Game
 from dotenv import load_dotenv
 
 load_dotenv()
+
+ADMIN_TG_ID = os.getenv("ADMIN_TG_ID", "7153815329")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 app = FastAPI(title="Shadow Survivor")
 
@@ -22,6 +24,8 @@ app.add_middleware(
 game = Game()
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
+
+os.makedirs(os.path.join(FRONTEND_DIR, "assets"), exist_ok=True)
 
 
 @app.on_event("startup")
@@ -47,6 +51,14 @@ async def config():
         "bot_count": 30,
         "max_players": 15,
     }
+
+
+@app.get("/{filename:path}")
+async def static_files(filename: str):
+    file_path = os.path.join(FRONTEND_DIR, filename)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
 
 class ConnectionManager:

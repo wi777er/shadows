@@ -1,6 +1,6 @@
 import random
 import math
-from models import Player, Bot, EnergyFragment, GameState
+from backend.models import Player, Bot, EnergyFragment, GameState
 
 
 class Game:
