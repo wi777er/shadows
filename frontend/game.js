@@ -423,11 +423,10 @@ class GameScene extends Phaser.Scene {
 
     damageEffect(target, attacker) {
         const angle = Math.atan2(target.y - attacker.y, target.x - attacker.x);
-            target.body.setVelocity(
-                Math.cos(angle) * KNOCKBACK_FORCE,
-                Math.sin(angle) * KNOCKBACK_FORCE
-            );
-        }
+        target.body.setVelocity(
+            Math.cos(angle) * KNOCKBACK_FORCE,
+            Math.sin(angle) * KNOCKBACK_FORCE
+        );
         if (target === this.player) {
             this.stunTimer = 150;
         } else {
