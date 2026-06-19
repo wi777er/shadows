@@ -90,6 +90,12 @@ function initTelegram() {
     }
     TG.MainButton?.hide();
     startPhaser();
+    setTimeout(() => {
+        const ls = document.getElementById('loading-screen');
+        if (ls && ls.style.display !== 'none' && ls.style.opacity !== '0') {
+            ls.innerHTML = '<h1>Shadow Survivor</h1><p style="color:#e67e22">Phaser не загрузился</p>';
+        }
+    }, 5000);
 }
 
 function showPlayerInfo(data) {
@@ -111,7 +117,7 @@ function startPhaser() {
 
     try {
         game = new Phaser.Game({
-            type: Phaser.AUTO,
+            type: Phaser.CANVAS,
             width: window.innerWidth,
             height: window.innerHeight,
             parent: 'game-container',
