@@ -183,7 +183,7 @@ class GameScene extends Phaser.Scene {
 
     createEnergyFragments() {
         for (let i = 0; i < ENERGY_FRAGMENTS_COUNT; i++) {
-            this.spawnEnergyFragment();
+            this.energyFragments.push(this.spawnEnergyFragment());
         }
         this.energyGraphics = this.add.graphics();
         this.energyGraphics.setDepth(5);
@@ -194,7 +194,6 @@ class GameScene extends Phaser.Scene {
             x: Phaser.Math.Between(100, ARENA_WIDTH - 100),
             y: Phaser.Math.Between(100, ARENA_HEIGHT - 100),
             value: Phaser.Math.Between(5, 20),
-            spawnedAt: this.time.now,
         };
     }
 
