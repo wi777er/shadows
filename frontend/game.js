@@ -263,6 +263,16 @@ class GameScene extends Phaser.Scene {
                 this.player.setData('kills', this.player.getData('kills') + 1);
                 this.updateUI();
             }
+            // Скрыть убитого удалённого игрока на нашем экране
+            if (msg.killed && msg.target_id !== this.playerId) {
+                const rp = this.remotePlayers[msg.target_id];
+                if (rp) {
+                    rp.sprite.setData('alive', false).setData('hp', 0);
+                    rp.sprite.setVisible(false);
+                    if (rp.sprite.body) rp.sprite.body.enable = false;
+                    rp.label.setVisible(false);
+                }
+            }
         } else if (msg.type === 'player_left') {
             this.removeRemotePlayer(msg.player_id);
         } else if (msg.type === 'state_change') {
@@ -339,7 +349,7 @@ class GameScene extends Phaser.Scene {
                 rp = { sprite, label, id: pid };
                 this.remotePlayers[pid] = rp;
             } else {
-                rp.sprite.setData('hp', pd.hp || 100).setData('maxHp', pd.max_hp || 100);
+                rp.sprite.setData('hp', pd.hp !== undefined ? pd.hp : 100).setData('maxHp', pd.max_hp !== undefined ? pd.max_hp : 100);
                 rp.sprite.setData('alive', pd.alive !== false);
                 if (pd.alive === false && rp.sprite.getData('alive') !== false) {
                     rp.sprite.setVisible(false);
