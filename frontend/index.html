@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shadow Survivor</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div id="loading-screen">
+            <h1>Shadow Survivor</h1>
+            <p>Loading...</p>
+        </div>
+        <div id="game-container"></div>
+        <div id="ui-overlay">
+            <div id="top-bar">
+                <div id="player-info">
+                    <span id="player-name"></span>
+                    <span id="player-level">Lv. 1</span>
+                </div>
+                <div id="stats">
+                    <span id="hp-bar">
+                        <span id="hp-fill"></span>
+                        <span id="hp-text">100/100</span>
+                    </span>
+                </div>
+                <div id="exp-bar">
+                    <span id="exp-fill"></span>
+                    <span id="exp-text">0/100</span>
+                </div>
+                <div id="kill-counter">Kills: 0</div>
+            </div>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
