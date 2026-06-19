@@ -105,9 +105,9 @@ manager = ConnectionManager()
 
 
 async def state_pusher(map_id: str):
-    """Push game state to all players on this map every 100ms."""
+    """Push game state to all players on this map every 50ms."""
     while True:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         game = maps.get(map_id)
         if not game or not game.state.players:
             continue

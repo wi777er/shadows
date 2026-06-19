@@ -1104,7 +1104,7 @@ class GameScene extends Phaser.Scene {
             // Send position to server
             this.sendMoveTimer -= delta;
             if (this.sendMoveTimer <= 0) {
-                this.sendMoveTimer = 100;
+                this.sendMoveTimer = 50;
                 const px = this.player.x, py = this.player.y;
                 if (Math.abs(px - this.lastSentPos.x) > 5 || Math.abs(py - this.lastSentPos.y) > 5) {
                     this.lastSentPos = { x: px, y: py };
