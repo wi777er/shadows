@@ -283,6 +283,8 @@ class GameScene extends Phaser.Scene {
         this.player.setData('exp', 0).setData('expToNext', 100);
         this.player.setData('damage', ATTACK_DAMAGE).setData('speed', PLAYER_SPEED).setData('kills', 0);
         this.player.setData('alive', true);
+        this.player.setData('atkCooldown', ATTACK_COOLDOWN).setData('atkRange', ATTACK_RANGE);
+        this.player.setData('atkAngle', ATTACK_ANGLE).setData('atkFlashDuration', ATTACK_FLASH_DURATION);
 
         this.playerLabel = this.add.text(ARENA_WIDTH / 2, ARENA_HEIGHT / 2 - PLAYER_RADIUS - 14,
             playerData?.first_name || 'Player', {
@@ -298,34 +300,34 @@ class GameScene extends Phaser.Scene {
         this.attackFlash = this.add.graphics().setDepth(9);
     }
 
-    drawCone(g, px, py, angle, alpha) {
+    drawCone(g, px, py, angle, range, angleSize, alpha) {
         g.clear();
-        const ha = ATTACK_ANGLE / 2;
+        const ha = angleSize / 2;
         g.fillStyle(0x9b59b6, alpha * 0.12);
         g.beginPath();
         g.moveTo(px, py);
-        g.lineTo(px + Math.cos(angle - ha) * ATTACK_RANGE, py + Math.sin(angle - ha) * ATTACK_RANGE);
-        g.arc(px, py, ATTACK_RANGE, angle - ha, angle + ha, false);
+        g.lineTo(px + Math.cos(angle - ha) * range, py + Math.sin(angle - ha) * range);
+        g.arc(px, py, range, angle - ha, angle + ha, false);
         g.closePath();
         g.fillPath();
         g.lineStyle(2, 0x9b59b6, alpha * 0.35);
         g.beginPath();
-        g.arc(px, py, ATTACK_RANGE, angle - ha, angle + ha, false);
+        g.arc(px, py, range, angle - ha, angle + ha, false);
         g.strokePath();
         g.lineStyle(1, 0x9b59b6, alpha * 0.25);
         g.beginPath();
         g.moveTo(px, py);
-        g.lineTo(px + Math.cos(angle - ha) * ATTACK_RANGE, py + Math.sin(angle - ha) * ATTACK_RANGE);
+        g.lineTo(px + Math.cos(angle - ha) * range, py + Math.sin(angle - ha) * range);
         g.moveTo(px, py);
-        g.lineTo(px + Math.cos(angle + ha) * ATTACK_RANGE, py + Math.sin(angle + ha) * ATTACK_RANGE);
+        g.lineTo(px + Math.cos(angle + ha) * range, py + Math.sin(angle + ha) * range);
         g.strokePath();
     }
 
-    drawFlash(g, px, py, angle, progress) {
+    drawFlash(g, px, py, angle, range, angleSize, progress) {
         g.clear();
-        const ha = ATTACK_ANGLE / 2;
+        const ha = angleSize / 2;
         const alpha = 1 - progress;
-        const r = ATTACK_RANGE * (1 + progress * 0.3);
+        const r = range * (1 + progress * 0.3);
         g.fillStyle(0xffffff, alpha * 0.4);
         g.beginPath();
         g.moveTo(px, py);
@@ -342,17 +344,20 @@ class GameScene extends Phaser.Scene {
     performAttack() {
         const px = this.player.x, py = this.player.y;
         const dmg = this.player.getData('damage');
-        this.flashTimer = ATTACK_FLASH_DURATION;
+        const atkRange = this.player.getData('atkRange');
+        const atkAngle = this.player.getData('atkAngle');
+        const atkFlashDuration = this.player.getData('atkFlashDuration');
+        this.flashTimer = atkFlashDuration;
 
         for (let i = this.enemyTargets.length - 1; i >= 0; i--) {
             const t = this.enemyTargets[i];
             if (!t.active || !t.getData('alive')) continue;
             const dx = t.x - px, dy = t.y - py;
-            if (Math.sqrt(dx * dx + dy * dy) > ATTACK_RANGE) continue;
+            if (Math.sqrt(dx * dx + dy * dy) > atkRange) continue;
             let diff = Math.atan2(dy, dx) - this.facingAngle;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
-            if (Math.abs(diff) <= ATTACK_ANGLE / 2) {
+            if (Math.abs(diff) <= atkAngle / 2) {
                 const newHp = t.getData('hp') - dmg;
                 t.setData('hp', newHp);
                 if (newHp <= 0) {
@@ -371,11 +376,13 @@ class GameScene extends Phaser.Scene {
 
     isInAttackCone(x, y) {
         const dx = x - this.player.x, dy = y - this.player.y;
-        if (Math.sqrt(dx * dx + dy * dy) > ATTACK_RANGE) return false;
+        const atkRange = this.player.getData('atkRange');
+        const atkAngle = this.player.getData('atkAngle');
+        if (Math.sqrt(dx * dx + dy * dy) > atkRange) return false;
         let diff = Math.atan2(dy, dx) - this.facingAngle;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
-        return Math.abs(diff) <= ATTACK_ANGLE / 2;
+        return Math.abs(diff) <= atkAngle / 2;
     }
 
     addTarget(sprite) {
@@ -705,19 +712,24 @@ class GameScene extends Phaser.Scene {
 
         const px = this.player.x, py = this.player.y;
 
-        this.drawCone(this.attackCone, px, py, this.facingAngle, 1);
+        const atkRange = this.player.getData('atkRange');
+        const atkAngle = this.player.getData('atkAngle');
+        this.drawCone(this.attackCone, px, py, this.facingAngle, atkRange, atkAngle, 1);
 
         if (this.flashTimer > 0) {
             this.flashTimer -= delta;
-            const p = 1 - this.flashTimer / ATTACK_FLASH_DURATION;
-            this.drawFlash(this.attackFlash, px, py, this.facingAngle, Math.min(1, Math.max(0, p)));
+            const atkRange = this.player.getData('atkRange');
+            const atkAngle = this.player.getData('atkAngle');
+            const atkFlashDuration = this.player.getData('atkFlashDuration');
+            const p = 1 - this.flashTimer / atkFlashDuration;
+            this.drawFlash(this.attackFlash, px, py, this.facingAngle, atkRange, atkAngle, Math.min(1, Math.max(0, p)));
         } else {
             this.attackFlash.clear();
         }
 
         this.attackTimer -= delta;
         if (this.attackTimer <= 0) {
-            this.attackTimer = ATTACK_COOLDOWN;
+            this.attackTimer = this.player.getData('atkCooldown');
             this.performAttack();
         }
 
