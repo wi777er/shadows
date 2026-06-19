@@ -272,7 +272,7 @@ class GameScene extends Phaser.Scene {
         );
 
         if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
-            this.player.setRotation(this.facingAngle);
+            this.player.setRotation(this.facingAngle + Math.PI / 2);
         }
     }
 
