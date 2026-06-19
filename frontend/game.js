@@ -342,7 +342,7 @@ class GameScene extends Phaser.Scene {
     performAttack() {
         const px = this.player.x, py = this.player.y;
         const dmg = this.player.getData('damage');
-        let hit = false;
+        this.flashTimer = ATTACK_FLASH_DURATION;
 
         for (let i = this.enemyTargets.length - 1; i >= 0; i--) {
             const t = this.enemyTargets[i];
@@ -353,7 +353,6 @@ class GameScene extends Phaser.Scene {
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
             if (Math.abs(diff) <= ATTACK_ANGLE / 2) {
-                hit = true;
                 const newHp = t.getData('hp') - dmg;
                 t.setData('hp', newHp);
                 if (newHp <= 0) {
@@ -368,8 +367,6 @@ class GameScene extends Phaser.Scene {
                 }
             }
         }
-
-        if (hit) this.flashTimer = ATTACK_FLASH_DURATION;
     }
 
     isInAttackCone(x, y) {
