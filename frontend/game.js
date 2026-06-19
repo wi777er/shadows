@@ -17,6 +17,7 @@ const ATTACK_FLASH_DURATION = 150;
 
 const ENERGY_FRAGMENTS_COUNT = 100;
 const ENERGY_RADIUS = 6;
+const ENERGY_GLOW_RADIUS = 20;
 const ENERGY_PICKUP_RANGE = 35;
 const ENERGY_RESPAWN_DELAY = { min: 5000, max: 10000 };
 
@@ -281,6 +282,7 @@ class GameScene extends Phaser.Scene {
         this.player.setData('hp', 100).setData('maxHp', 100).setData('level', 1);
         this.player.setData('exp', 0).setData('expToNext', 100);
         this.player.setData('damage', ATTACK_DAMAGE).setData('speed', PLAYER_SPEED).setData('kills', 0);
+        this.player.setData('alive', true);
 
         this.playerLabel = this.add.text(ARENA_WIDTH / 2, ARENA_HEIGHT / 2 - PLAYER_RADIUS - 14,
             playerData?.first_name || 'Player', {
@@ -340,7 +342,7 @@ class GameScene extends Phaser.Scene {
     performAttack() {
         const px = this.player.x, py = this.player.y;
         const dmg = this.player.getData('damage');
-        this.flashTimer = ATTACK_FLASH_DURATION;
+        let hit = false;
 
         for (let i = this.enemyTargets.length - 1; i >= 0; i--) {
             const t = this.enemyTargets[i];
@@ -351,16 +353,23 @@ class GameScene extends Phaser.Scene {
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
             if (Math.abs(diff) <= ATTACK_ANGLE / 2) {
+                hit = true;
                 const newHp = t.getData('hp') - dmg;
                 t.setData('hp', newHp);
                 if (newHp <= 0) {
                     t.setData('alive', false);
+                    t.setVisible(false);
+                    t.body.enable = false;
+                    const deadBot = this.bots.find(b => b.sprite === t);
+                    if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
                     this.player.setData('kills', this.player.getData('kills') + 1);
                     this.updateUI();
                     this.dropEnergyOnDeath(t.x, t.y);
                 }
             }
         }
+
+        if (hit) this.flashTimer = ATTACK_FLASH_DURATION;
     }
 
     isInAttackCone(x, y) {
@@ -488,7 +497,10 @@ class GameScene extends Phaser.Scene {
         bot.sprite.setVelocity(0, 0);
         bot.sprite.setAlpha(1);
         bot.sprite.setVisible(true);
+        if (bot.sprite.body) bot.sprite.body.enable = true;
+        bot.label.setVisible(true);
         bot.aiTimer = Phaser.Math.Between(100, 500);
+        bot.attackTimer = 0;
         bot.state = 'roam';
     }
 
@@ -547,9 +559,11 @@ class GameScene extends Phaser.Scene {
                     nearestEnemy.setData('hp', nhp);
                     if (nhp <= 0) {
                         nearestEnemy.setData('alive', false);
-                        if (nearestEnemy === this.player) {
-                            this.dropEnergyOnDeath(sx, sy);
-                        }
+                        nearestEnemy.setVisible(false);
+                        if (nearestEnemy.body) nearestEnemy.body.enable = false;
+                        const deadBot = this.bots.find(b => b.sprite === nearestEnemy);
+                        if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
+                        this.dropEnergyOnDeath(nearestEnemy.x, nearestEnemy.y);
                     }
                 }
             }
@@ -609,15 +623,11 @@ class GameScene extends Phaser.Scene {
     }
 
     createJoystick() {
-        const x = 100;
-        const y = this.scale.height - 100;
-
         this.joystickBase = this.add.graphics().setDepth(100).setScrollFactor(0);
         this.joystickThumb = this.add.graphics().setDepth(101).setScrollFactor(0);
-        this.drawJoystickBase(x, y);
-        this.drawJoystickThumb(x, y);
-
-        this.joystick = { x, y };
+        this.joystick = { x: 0, y: 0 };
+        this.joystickActive = false;
+        this.joystickDir = { x: 0, y: 0 };
     }
 
     drawJoystickBase(x, y) {
@@ -635,11 +645,12 @@ class GameScene extends Phaser.Scene {
     }
 
     onPointerDown(pointer) {
-        const dx = pointer.x - this.joystick.x, dy = pointer.y - this.joystick.y;
-        if (Math.sqrt(dx * dx + dy * dy) < JOYSTICK_BASE_RADIUS + 40) {
-            this.joystickActive = true;
-            this.updateJoystick(pointer);
-        }
+        if (pointer.y < 80) return;
+        this.joystick.x = pointer.x;
+        this.joystick.y = pointer.y;
+        this.drawJoystickBase(pointer.x, pointer.y);
+        this.drawJoystickThumb(pointer.x, pointer.y);
+        this.joystickActive = true;
     }
 
     onPointerMove(pointer) {
@@ -649,8 +660,9 @@ class GameScene extends Phaser.Scene {
     onPointerUp() {
         this.joystickActive = false;
         this.joystickDir = { x: 0, y: 0 };
-        this.drawJoystickThumb(this.joystick.x, this.joystick.y);
         this.player.setVelocity(0, 0);
+        this.joystickBase.clear();
+        this.joystickThumb.clear();
     }
 
     updateJoystick(pointer) {
@@ -660,9 +672,14 @@ class GameScene extends Phaser.Scene {
         let clampedDist = Math.min(dist, maxDist);
         let nx = dx / (dist || 1), ny = dy / (dist || 1);
         if (dist > maxDist) { dx = nx * maxDist; dy = ny * maxDist; }
+        this.joystickThumb.clear();
         this.drawJoystickThumb(this.joystick.x + dx, this.joystick.y + dy);
-        this.joystickDir = { x: nx * (clampedDist / maxDist), y: ny * (clampedDist / maxDist) };
-        if (dist > 5) this.facingAngle = Math.atan2(dy, dx);
+        if (dist > 5) {
+            this.joystickDir = { x: nx * (clampedDist / maxDist), y: ny * (clampedDist / maxDist) };
+            this.facingAngle = Math.atan2(dy, dx);
+        } else {
+            this.joystickDir = { x: 0, y: 0 };
+        }
     }
 
     updateUI() {
@@ -747,7 +764,7 @@ class GameScene extends Phaser.Scene {
         this.drawBotBars();
 
         for (const bot of this.bots) {
-            if (!bot.sprite.getData('alive') && bot.respawnTimer <= 0) {
+            if (!bot.sprite.getData('alive') && (bot.respawnTimer === undefined || bot.respawnTimer <= 0 || isNaN(bot.respawnTimer))) {
                 bot.respawnTimer = Phaser.Math.Between(BOT_RESPAWN_DELAY.min, BOT_RESPAWN_DELAY.max);
             }
         }
@@ -756,11 +773,6 @@ class GameScene extends Phaser.Scene {
     resize() {
         const w = this.scale.width, h = this.scale.height;
         this.cameras.main.setSize(w, h);
-        if (this.joystick) {
-            this.joystick.y = h - 100;
-            this.drawJoystickBase(this.joystick.x, this.joystick.y);
-            if (!this.joystickActive) this.drawJoystickThumb(this.joystick.x, this.joystick.y);
-        }
     }
 }
 
