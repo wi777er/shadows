@@ -444,6 +444,7 @@ class GameScene extends Phaser.Scene {
     }
 
     respawnPlayer() {
+        if (!this.player || !this.playerLabel) return;
         this.stunTimer = 0;
         this.joystickDir = { x: 0, y: 0 };
         this.player.setData('alive', true);
@@ -454,7 +455,7 @@ class GameScene extends Phaser.Scene {
         );
         this.player.setVelocity(0, 0);
         this.player.setVisible(true);
-        this.player.body.enable = true;
+        if (this.player.body) this.player.body.enable = true;
         this.playerLabel.setVisible(true);
         this.player.clearTint();
         this.updateUI();
@@ -1110,6 +1111,10 @@ class GameScene extends Phaser.Scene {
         document.getElementById('exp-fill').style.width = `${Math.min(100, e / en * 100)}%`;
         document.getElementById('exp-text').textContent = `${e}/${en}`;
         document.getElementById('kill-counter').textContent = `Kills: ${k}`;
+        const dmgEl = document.getElementById('stat-dmg');
+        const spdEl = document.getElementById('stat-spd');
+        if (dmgEl) dmgEl.textContent = `DMG: ${this.player.getData('damage')}`;
+        if (spdEl) spdEl.textContent = `SPD: ${this.player.getData('speed')}`;
     }
 
     update(time, delta) {
