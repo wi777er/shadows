@@ -25,7 +25,7 @@ const BOT_RADIUS = 16;
 const BOT_COLOR = 0xdc2626;
 const BOT_RESPAWN_DELAY = { min: 5000, max: 10000 };
 const BOT_AI_INTERVAL = { min: 300, max: 800 };
-const BOT_ATTACK_COOLDOWN = 1200;
+const BOT_ATTACK_COOLDOWN = 800;
 const BOT_FLEE_HP_RATIO = 0.3;
 const BOT_SEEK_RANGE = 300;
 const BOT_ATTACK_RANGE = 55;
@@ -37,19 +37,27 @@ const JOYSTICK_BASE_RADIUS = 60;
 const JOYSTICK_THUMB_RADIUS = 25;
 const JOYSTICK_ALPHA = 0.3;
 
-const BOT_NAMES = [
-    'Shadow Wraith', 'Night Stalker', 'Void Walker', 'Dusk Hunter', 'Phantom Blade',
-    'Gloom Reaper', 'Dark Shade', 'Soul Drinker', 'Twilight Fang', 'Obsidian Knight',
-    'Umbra Lynx', 'Nocturne Mage', 'Shadow Viper', 'Eclipse Warrior', 'Dark Rogue',
-    'Mist Warden', 'Cinder Phantom', 'Grave Walker', 'Dread Howl', 'Void Seeker',
-    'Night Raven', 'Ashen One', 'Blight Lord', 'Shadow Monk', 'Frost Wight',
-    'Blood Thorn', 'Storm Shade', 'Crystal Wraith', 'Ember Husk', 'Rust Knight',
-    'Bone Walker', 'Dusk Blade', 'Void Crawler', 'Nether Guard', 'Fallen Sun',
-    'Grim Watcher', 'Sorrow Knight', 'Ash Wanderer', 'Wraith Lord', 'Dark Runner',
-    'Flame Shade', 'Night Howler', 'Storm Revenant', 'Cinder Lord', 'Shadow Bear',
-    'Frozen Wraith', 'Blight Walker', 'Void Hound', 'Dusk Reaper', 'Iron Phantom',
-    'Shadow Vulture', 'Blood Walker', 'Night Terror', 'Soul Reaver', 'Dark Warden',
+const BOT_PREFIXES = [
+    'Shadow', 'Night', 'Void', 'Dusk', 'Dark', 'Frost', 'Blood', 'Storm', 'Grim', 'Ash',
+    'Flame', 'Iron', 'Crystal', 'Nether', 'Grave', 'Mist', 'Rust', 'Bone', 'Ember', 'Frozen',
+    'Wraith', 'Cinder', 'Blight', 'Dread', 'Sorrow', 'Obsidian', 'Twilight', 'Umbra', 'Nocturne',
+    'Doom', 'Fallen', 'Silent', 'Black', 'Pale', 'Crimson', 'Venom', 'Thunder', 'Wild', 'Savage',
+    'Ebon', 'Witch', 'Dark', 'Gloom', 'Ashen', 'Raven', 'Scarlet', 'Ghost', 'Vile', 'Mad',
 ];
+
+const BOT_SUFFIXES = [
+    'Wraith', 'Stalker', 'Walker', 'Hunter', 'Blade', 'Reaper', 'Fang', 'Knight', 'Shade', 'Lord',
+    'Howler', 'Hound', 'Raven', 'Viper', 'Lynx', 'Bear', 'Rogue', 'Mage', 'Monk', 'Warden',
+    'Seeker', 'Runner', 'Terror', 'Phoenix', 'Wolf', 'Vulture', 'Crawler', 'Guard', 'Watcher',
+    'Wanderer', 'Revenant', 'Phantom', 'Drinker', 'Wight', 'Thorn', 'Husk', 'One', 'Sun', 'Warrior',
+    'Slayer', 'Sentinel', 'Bane', 'Maw', 'Claw', 'Soul', 'Weaver', 'Caller', 'Spawn', 'Fiend',
+];
+
+function generateBotName() {
+    const p = BOT_PREFIXES[Math.floor(Math.random() * BOT_PREFIXES.length)];
+    const s = BOT_SUFFIXES[Math.floor(Math.random() * BOT_SUFFIXES.length)];
+    return `${p} ${s}`;
+}
 
 function initTelegram() {
     if (!TG) {
@@ -389,15 +397,14 @@ class GameScene extends Phaser.Scene {
     spawnBot() {
         const bot = {};
 
+        let name;
         const used = new Set();
         for (const b of this.bots) if (b.name) used.add(b.name);
-        let name;
-        const available = BOT_NAMES.filter(n => !used.has(n));
-        if (available.length > 0) {
-            name = available[Math.floor(Math.random() * available.length)];
-        } else {
-            name = `Shadow ${Math.floor(Math.random() * 1000)}`;
-        }
+        let attempts = 0;
+        do {
+            name = generateBotName();
+            attempts++;
+        } while (used.has(name) && attempts < 100);
 
         const lvl = Phaser.Math.Between(1, Math.min(3, this.player.getData('level') + 1));
 
@@ -461,6 +468,17 @@ class GameScene extends Phaser.Scene {
     }
 
     respawnBot(bot) {
+        const used = new Set();
+        for (const b of this.bots) if (b.name) used.add(b.name);
+        let name;
+        let attempts = 0;
+        do {
+            name = generateBotName();
+            attempts++;
+        } while (used.has(name) && attempts < 100);
+        bot.name = name;
+        bot.label.setText(name);
+
         bot.sprite.setData('hp', bot.sprite.getData('maxHp'));
         bot.sprite.setData('alive', true);
         bot.sprite.setPosition(
