@@ -1,7 +1,7 @@
 import os
 import math
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from backend.database import init_db, save_player
@@ -116,9 +116,11 @@ async def state_pusher(map_id: str):
 
 
 @app.websocket("/ws/{player_id}")
-async def websocket_endpoint(websocket: WebSocket, player_id: str):
+async def websocket_endpoint(websocket: WebSocket, player_id: str, name: str = Query("")):
     await manager.connect(player_id, websocket)
-    name = f"Player_{player_id[:6]}"
+    if not name:
+        name = f"Player_{player_id[:6]}"
+    name = name[:20]
     current_map = "map_1"
     game = maps[current_map]
     game.add_player(player_id, name)

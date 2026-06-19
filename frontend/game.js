@@ -72,9 +72,19 @@ function generateBotName() {
 function initTelegram() {
     if (!TG) {
         console.warn('Not running in Telegram');
-        playerData = { id: 'local_' + Date.now(), first_name: 'TestPlayer', username: 'test' };
-        showPlayerInfo(playerData);
-        startPhaser();
+        document.getElementById('nickname-overlay').classList.remove('hidden');
+        document.getElementById('loading-screen').style.display = 'none';
+        const input = document.getElementById('nickname-input');
+        const btn = document.getElementById('nickname-btn');
+        const start = () => {
+            const name = input.value.trim() || 'Player';
+            playerData = { id: 'local_' + Date.now(), first_name: name, username: '' };
+            document.getElementById('nickname-overlay').classList.add('hidden');
+            showPlayerInfo(playerData);
+            startPhaser();
+        };
+        btn.onclick = start;
+        input.onkeydown = (e) => { if (e.key === 'Enter') start(); };
         return;
     }
     TG.ready();
@@ -169,6 +179,7 @@ class GameScene extends Phaser.Scene {
         this.lastSentPos = { x: 0, y: 0 };
         this.wsReconnectTimer = 0;
         this.sendMoveTimer = 0;
+        this.upgradeTimer = null;
     }
 
     create() {
@@ -238,7 +249,8 @@ class GameScene extends Phaser.Scene {
     connectWs() {
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
-        this.ws = new WebSocket(`${proto}//${host}/ws/${this.playerId}`);
+        const name = encodeURIComponent(playerData?.first_name || 'Player');
+        this.ws = new WebSocket(`${proto}//${host}/ws/${this.playerId}?name=${name}`);
         this.ws.onopen = () => {};
         this.ws.onmessage = (event) => {
             try { this.handleWsMessage(JSON.parse(event.data)); }
@@ -277,6 +289,8 @@ class GameScene extends Phaser.Scene {
             this.removeRemotePlayer(msg.player_id);
         } else if (msg.type === 'state_change') {
             this.clearRemotePlayers();
+            document.getElementById('upgrade-overlay').classList.add('hidden');
+            if (this.upgradeTimer) { clearTimeout(this.upgradeTimer); this.upgradeTimer = null; }
             for (const bot of this.bots) { bot.label.destroy(); }
             this.bots = [];
             if (this.botGroup) this.botGroup.destroy(true);
@@ -562,6 +576,25 @@ class GameScene extends Phaser.Scene {
 
     showUpgradeChoice() {
         document.getElementById('upgrade-overlay').classList.remove('hidden');
+        if (this.upgradeTimer) clearTimeout(this.upgradeTimer);
+        this.upgradeTimer = setTimeout(() => {
+            const btns = document.querySelectorAll('.upgrade-btn');
+            if (btns.length > 0) {
+                const idx = Math.floor(Math.random() * btns.length);
+                this.applyUpgrade(btns[idx].dataset.stat);
+            }
+        }, 5000);
+    }
+
+    applyUpgrade(stat) {
+        if (this.upgradeTimer) { clearTimeout(this.upgradeTimer); this.upgradeTimer = null; }
+        document.getElementById('upgrade-overlay').classList.add('hidden');
+        if (stat === 'damage') this.player.setData('damage', this.player.getData('damage') + 5);
+        else if (stat === 'maxHp') {
+            this.player.setData('maxHp', this.player.getData('maxHp') + 25);
+            this.player.setData('hp', Math.min(this.player.getData('hp') + 25, this.player.getData('maxHp')));
+        } else if (stat === 'speed') this.player.setData('speed', Math.min(300, this.player.getData('speed') + 15));
+        this.updateUI();
     }
 
     returnToBattle() {
