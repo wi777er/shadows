@@ -212,12 +212,23 @@ class GameScene extends Phaser.Scene {
         this.player.setData('alive', false);
         this.player.setVelocity(0, 0);
 
+        // Reset progress on death
+        this.player.setData('level', 1);
+        this.player.setData('exp', 0);
+        this.player.setData('expToNext', XP_BASE);
+        this.player.setData('kills', 0);
+        this.player.setData('damage', ATTACK_DAMAGE);
+        this.player.setData('speed', PLAYER_SPEED);
+        this.player.setData('maxHp', 100);
+        this.player.setData('hp', 0);
+
         const overlay = document.getElementById('death-overlay');
         overlay.classList.remove('hidden');
         document.getElementById('death-info').textContent =
-            `Level ${this.player.getData('level')} | Kills: ${this.player.getData('kills')}`;
+            `Level 1 | Kills: 0`;
 
         this.dropEnergyOnDeath(this.player.x, this.player.y);
+        this.updateUI();
 
         this.time.delayedCall(500, () => {
             this.player.setVisible(false);
