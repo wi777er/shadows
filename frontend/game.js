@@ -775,7 +775,7 @@ class GameScene extends Phaser.Scene {
 
     botMove(bot) {
         const s = bot.sprite;
-        if (s.getData('stunTimer') > 0) { s.setVelocity(0, 0); return; }
+        if (s.getData('stunTimer') > 0) { return; }
         const sx = s.x, sy = s.y;
         const speed = s.getData('speed');
         const dx = bot.targetX - sx, dy = bot.targetY - sy;
