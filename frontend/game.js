@@ -9,6 +9,9 @@ const PLAYER_RADIUS = 18;
 const PLAYER_COLOR = 0x9b59b6;
 const PLAYER_SPEED = 200;
 
+const ATTACK_RANGE = 60;
+const ATTACK_ANGLE = Math.PI * 2 / 3;
+
 const JOYSTICK_BASE_RADIUS = 60;
 const JOYSTICK_THUMB_RADIUS = 25;
 const JOYSTICK_ALPHA = 0.3;
@@ -77,6 +80,7 @@ class GameScene extends Phaser.Scene {
         super('GameScene');
         this.player = null;
         this.playerLabel = null;
+        this.attackCone = null;
         this.joystick = null;
         this.joystickActive = false;
         this.joystickDir = { x: 0, y: 0 };
@@ -89,6 +93,7 @@ class GameScene extends Phaser.Scene {
 
         this.createArena();
         this.createPlayer();
+        this.createAttackCone();
         this.createJoystick();
 
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -102,15 +107,27 @@ class GameScene extends Phaser.Scene {
 
     createArena() {
         const g = this.add.graphics();
-        g.fillStyle(0x16213e, 1);
+
+        g.fillStyle(0x0f0f23, 1);
         g.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
-        g.lineStyle(1, 0x1a1a3e, 0.3);
+        g.lineStyle(1, 0x2a2a5e, 0.4);
         for (let x = 0; x <= ARENA_WIDTH; x += 100) {
             g.moveTo(x, 0);
             g.lineTo(x, ARENA_HEIGHT);
         }
         for (let y = 0; y <= ARENA_HEIGHT; y += 100) {
+            g.moveTo(0, y);
+            g.lineTo(ARENA_WIDTH, y);
+        }
+        g.strokePath();
+
+        g.lineStyle(2, 0x4a4a9e, 0.5);
+        for (let x = 0; x <= ARENA_WIDTH; x += 500) {
+            g.moveTo(x, 0);
+            g.lineTo(x, ARENA_HEIGHT);
+        }
+        for (let y = 0; y <= ARENA_HEIGHT; y += 500) {
             g.moveTo(0, y);
             g.lineTo(ARENA_WIDTH, y);
         }
@@ -129,12 +146,12 @@ class GameScene extends Phaser.Scene {
 
         const gfx = this.make.graphics({ add: false });
         const mid = s / 2;
-        gfx.fillStyle(0xffffff, 0.15);
-        gfx.fillCircle(mid, mid, PLAYER_RADIUS + 6);
+        gfx.fillStyle(0xffffff, 0.12);
+        gfx.fillCircle(mid, mid, PLAYER_RADIUS + 5);
         gfx.fillStyle(PLAYER_COLOR, 1);
         gfx.fillCircle(mid, mid, PLAYER_RADIUS);
-        gfx.fillStyle(0x8e44ad, 1);
-        gfx.fillTriangle(mid, mid - PLAYER_RADIUS - 4, mid - 8, mid - 2, mid + 8, mid - 2);
+        gfx.fillStyle(0x7c3aed, 1);
+        gfx.fillCircle(mid, mid, PLAYER_RADIUS - 6);
         gfx.generateTexture('player_tex', s, s);
         gfx.destroy();
 
@@ -157,6 +174,50 @@ class GameScene extends Phaser.Scene {
         }).setOrigin(0.5).setDepth(11);
 
         this.updateUI();
+    }
+
+    createAttackCone() {
+        this.attackCone = this.add.graphics();
+        this.attackCone.setDepth(9);
+    }
+
+    drawAttackCone() {
+        this.attackCone.clear();
+
+        const px = this.player.x;
+        const py = this.player.y;
+        const angle = this.facingAngle;
+        const halfAngle = ATTACK_ANGLE / 2;
+
+        this.attackCone.fillStyle(0x9b59b6, 0.12);
+        this.attackCone.beginPath();
+        this.attackCone.moveTo(px, py);
+        this.attackCone.lineTo(
+            px + Math.cos(angle - halfAngle) * ATTACK_RANGE,
+            py + Math.sin(angle - halfAngle) * ATTACK_RANGE
+        );
+        this.attackCone.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
+        this.attackCone.closePath();
+        this.attackCone.fillPath();
+
+        this.attackCone.lineStyle(2, 0x9b59b6, 0.35);
+        this.attackCone.beginPath();
+        this.attackCone.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
+        this.attackCone.strokePath();
+
+        this.attackCone.lineStyle(1, 0x9b59b6, 0.25);
+        this.attackCone.beginPath();
+        this.attackCone.moveTo(px, py);
+        this.attackCone.lineTo(
+            px + Math.cos(angle - halfAngle) * ATTACK_RANGE,
+            py + Math.sin(angle - halfAngle) * ATTACK_RANGE
+        );
+        this.attackCone.moveTo(px, py);
+        this.attackCone.lineTo(
+            px + Math.cos(angle + halfAngle) * ATTACK_RANGE,
+            py + Math.sin(angle + halfAngle) * ATTACK_RANGE
+        );
+        this.attackCone.strokePath();
     }
 
     createJoystick() {
@@ -274,6 +335,8 @@ class GameScene extends Phaser.Scene {
         if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
             this.player.setRotation(this.facingAngle + Math.PI / 2);
         }
+
+        this.drawAttackCone();
     }
 
     resize() {
