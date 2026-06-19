@@ -512,15 +512,57 @@ class GameScene extends Phaser.Scene {
         const s = bot.sprite;
         if (!s.active || !s.getData('alive')) return;
 
+        const sx = s.x, sy = s.y;
+        const speed = s.getData('speed');
+
+        // Attack cooldown runs every frame
+        if (bot.state === 'attack') {
+            bot.attackTimer -= delta;
+            if (bot.attackTimer <= 0) {
+                bot.attackTimer = BOT_ATTACK_COOLDOWN;
+                let target = null;
+                let targetDist = Infinity;
+                if (this.player.getData('alive')) {
+                    const d = Phaser.Math.Distance.Between(sx, sy, this.player.x, this.player.y);
+                    if (d < targetDist && d < BOT_ATTACK_RANGE) { targetDist = d; target = this.player; }
+                }
+                if (!target) {
+                    for (const other of this.bots) {
+                        if (other === bot || !other.sprite.getData('alive')) continue;
+                        const d = Phaser.Math.Distance.Between(sx, sy, other.sprite.x, other.sprite.y);
+                        if (d < targetDist && d < BOT_ATTACK_RANGE) { targetDist = d; target = other.sprite; }
+                    }
+                }
+                if (target && target.getData('alive')) {
+                    const nhp = target.getData('hp') - s.getData('damage');
+                    target.setData('hp', nhp);
+                    if (target === this.player) this.updateUI();
+                    if (nhp <= 0) {
+                        target.setData('alive', false);
+                        target.setVisible(false);
+                        if (target.body) target.body.enable = false;
+                        const deadBot = this.bots.find(b => b.sprite === target);
+                        if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
+                        this.dropEnergyOnDeath(target.x, target.y);
+                    }
+                }
+            }
+        }
+
+        // AI decisions only when aiTimer expires
         bot.aiTimer -= delta;
-        if (bot.aiTimer > 0) return;
+        if (bot.aiTimer > 0) {
+            // Keep moving toward current target
+            const angle = Math.atan2(bot.targetY - sy, bot.targetX - sx);
+            s.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+            s.setRotation(angle + Math.PI / 2);
+            return;
+        }
 
         bot.aiTimer = Phaser.Math.Between(BOT_AI_INTERVAL.min, BOT_AI_INTERVAL.max);
 
         const hp = s.getData('hp');
         const maxHp = s.getData('maxHp');
-        const sx = s.x, sy = s.y;
-        const speed = s.getData('speed');
 
         let nearestEnemy = null;
         let nearestEnemyDist = Infinity;
@@ -555,23 +597,6 @@ class GameScene extends Phaser.Scene {
             bot.state = 'attack';
             bot.targetX = nearestEnemy.x;
             bot.targetY = nearestEnemy.y;
-            bot.attackTimer -= delta;
-            if (bot.attackTimer <= 0) {
-                bot.attackTimer = BOT_ATTACK_COOLDOWN;
-                if (nearestEnemy.getData('alive')) {
-                    const nhp = nearestEnemy.getData('hp') - s.getData('damage');
-                    nearestEnemy.setData('hp', nhp);
-                    if (nearestEnemy === this.player) this.updateUI();
-                    if (nhp <= 0) {
-                        nearestEnemy.setData('alive', false);
-                        nearestEnemy.setVisible(false);
-                        if (nearestEnemy.body) nearestEnemy.body.enable = false;
-                        const deadBot = this.bots.find(b => b.sprite === nearestEnemy);
-                        if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
-                        this.dropEnergyOnDeath(nearestEnemy.x, nearestEnemy.y);
-                    }
-                }
-            }
         } else if (nearestEnemy && nearestEnemyDist < BOT_CHASE_RANGE) {
             bot.state = 'chase';
             bot.targetX = nearestEnemy.x;
