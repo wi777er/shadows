@@ -30,6 +30,7 @@ const BOT_ATTACK_COOLDOWN = 800;
 const BOT_FLEE_HP_RATIO = 0.3;
 const BOT_SEEK_RANGE = 300;
 const BOT_ATTACK_RANGE = 55;
+const BOT_CHASE_RANGE = 300;
 
 const XP_BASE = 100;
 const XP_SCALE = 50;
@@ -462,7 +463,7 @@ class GameScene extends Phaser.Scene {
         bot.label = label;
         bot.name = name;
         bot.aiTimer = Phaser.Math.Between(100, 500);
-        bot.attackTimer = 0;
+        bot.attackTimer = Phaser.Math.Between(0, BOT_ATTACK_COOLDOWN);
         bot.state = 'roam';
         bot.targetX = x;
         bot.targetY = y;
@@ -503,7 +504,7 @@ class GameScene extends Phaser.Scene {
         if (bot.sprite.body) bot.sprite.body.enable = true;
         bot.label.setVisible(true);
         bot.aiTimer = Phaser.Math.Between(100, 500);
-        bot.attackTimer = 0;
+        bot.attackTimer = Phaser.Math.Between(0, BOT_ATTACK_COOLDOWN);
         bot.state = 'roam';
     }
 
@@ -560,6 +561,7 @@ class GameScene extends Phaser.Scene {
                 if (nearestEnemy.getData('alive')) {
                     const nhp = nearestEnemy.getData('hp') - s.getData('damage');
                     nearestEnemy.setData('hp', nhp);
+                    if (nearestEnemy === this.player) this.updateUI();
                     if (nhp <= 0) {
                         nearestEnemy.setData('alive', false);
                         nearestEnemy.setVisible(false);
@@ -570,6 +572,10 @@ class GameScene extends Phaser.Scene {
                     }
                 }
             }
+        } else if (nearestEnemy && nearestEnemyDist < BOT_CHASE_RANGE) {
+            bot.state = 'chase';
+            bot.targetX = nearestEnemy.x;
+            bot.targetY = nearestEnemy.y;
         } else if (nearestEnergy && nearestEnergyDist < BOT_SEEK_RANGE) {
             bot.state = 'seek';
             bot.targetX = nearestEnergy.x;
