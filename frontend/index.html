@@ -53,6 +53,15 @@
             </div>
         </div>
     </div>
+    <script>
+        window.__gameLoaded = false;
+        setTimeout(function () {
+            if (!window.__gameLoaded) {
+                var el = document.getElementById('loading-screen');
+                if (el) el.innerHTML = '<h1 style="color:#e74c3c">Ошибка загрузки</h1><p style="color:#fff;font-size:14px;padding:20px">JS файл не выполнился — синтаксическая ошибка</p>';
+            }
+        }, 5000);
+    </script>
     <script src="game.js"></script>
 </body>
 </html>

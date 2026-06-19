@@ -1184,3 +1184,5 @@ class GameScene extends Phaser.Scene {
 }
 
 document.addEventListener('DOMContentLoaded', initTelegram);
+
+window.__gameLoaded = true;
