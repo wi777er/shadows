@@ -18,7 +18,17 @@ const ATTACK_FLASH_DURATION = 150;
 const ENERGY_FRAGMENTS_COUNT = 100;
 const ENERGY_RADIUS = 6;
 const ENERGY_PICKUP_RANGE = 35;
-const ENERGY_GLOW_RADIUS = 14;
+const ENERGY_RESPAWN_DELAY = { min: 5000, max: 10000 };
+
+const BOT_COUNT = 30;
+const BOT_RADIUS = 16;
+const BOT_COLOR = 0xdc2626;
+const BOT_RESPAWN_DELAY = { min: 5000, max: 10000 };
+const BOT_AI_INTERVAL = { min: 300, max: 800 };
+const BOT_ATTACK_COOLDOWN = 1200;
+const BOT_FLEE_HP_RATIO = 0.3;
+const BOT_SEEK_RANGE = 300;
+const BOT_ATTACK_RANGE = 55;
 
 const XP_BASE = 100;
 const XP_SCALE = 50;
@@ -26,6 +36,20 @@ const XP_SCALE = 50;
 const JOYSTICK_BASE_RADIUS = 60;
 const JOYSTICK_THUMB_RADIUS = 25;
 const JOYSTICK_ALPHA = 0.3;
+
+const BOT_NAMES = [
+    'Shadow Wraith', 'Night Stalker', 'Void Walker', 'Dusk Hunter', 'Phantom Blade',
+    'Gloom Reaper', 'Dark Shade', 'Soul Drinker', 'Twilight Fang', 'Obsidian Knight',
+    'Umbra Lynx', 'Nocturne Mage', 'Shadow Viper', 'Eclipse Warrior', 'Dark Rogue',
+    'Mist Warden', 'Cinder Phantom', 'Grave Walker', 'Dread Howl', 'Void Seeker',
+    'Night Raven', 'Ashen One', 'Blight Lord', 'Shadow Monk', 'Frost Wight',
+    'Blood Thorn', 'Storm Shade', 'Crystal Wraith', 'Ember Husk', 'Rust Knight',
+    'Bone Walker', 'Dusk Blade', 'Void Crawler', 'Nether Guard', 'Fallen Sun',
+    'Grim Watcher', 'Sorrow Knight', 'Ash Wanderer', 'Wraith Lord', 'Dark Runner',
+    'Flame Shade', 'Night Howler', 'Storm Revenant', 'Cinder Lord', 'Shadow Bear',
+    'Frozen Wraith', 'Blight Walker', 'Void Hound', 'Dusk Reaper', 'Iron Phantom',
+    'Shadow Vulture', 'Blood Walker', 'Night Terror', 'Soul Reaver', 'Dark Warden',
+];
 
 function initTelegram() {
     if (!TG) {
@@ -77,10 +101,7 @@ function startPhaser() {
             default: 'arcade',
             arcade: { gravity: { y: 0 }, debug: false },
         },
-        scale: {
-            mode: Phaser.Scale.RESIZE,
-            autoCenter: Phaser.Scale.CENTER_BOTH,
-        },
+        scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
         input: { activePointers: 2 },
         scene: [GameScene],
     });
@@ -104,6 +125,10 @@ class GameScene extends Phaser.Scene {
         this.energyGraphics = null;
         this.collectFlashTimer = 0;
         this.levelUpTimer = 0;
+        this.bots = [];
+        this.botGraphics = null;
+        this.energyRespawnQueue = [];
+        this.botNamesUsed = [];
     }
 
     create() {
@@ -114,6 +139,7 @@ class GameScene extends Phaser.Scene {
         this.createEnergyFragments();
         this.createPlayer();
         this.createAttackCone();
+        this.createBots();
         this.createJoystick();
 
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -127,30 +153,17 @@ class GameScene extends Phaser.Scene {
 
     createArena() {
         const g = this.add.graphics();
-
         g.fillStyle(0x0f0f23, 1);
         g.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
         g.lineStyle(1, 0x2a2a5e, 0.4);
-        for (let x = 0; x <= ARENA_WIDTH; x += 100) {
-            g.moveTo(x, 0);
-            g.lineTo(x, ARENA_HEIGHT);
-        }
-        for (let y = 0; y <= ARENA_HEIGHT; y += 100) {
-            g.moveTo(0, y);
-            g.lineTo(ARENA_WIDTH, y);
-        }
+        for (let x = 0; x <= ARENA_WIDTH; x += 100) { g.moveTo(x, 0); g.lineTo(x, ARENA_HEIGHT); }
+        for (let y = 0; y <= ARENA_HEIGHT; y += 100) { g.moveTo(0, y); g.lineTo(ARENA_WIDTH, y); }
         g.strokePath();
 
         g.lineStyle(2, 0x4a4a9e, 0.5);
-        for (let x = 0; x <= ARENA_WIDTH; x += 500) {
-            g.moveTo(x, 0);
-            g.lineTo(x, ARENA_HEIGHT);
-        }
-        for (let y = 0; y <= ARENA_HEIGHT; y += 500) {
-            g.moveTo(0, y);
-            g.lineTo(ARENA_WIDTH, y);
-        }
+        for (let x = 0; x <= ARENA_WIDTH; x += 500) { g.moveTo(x, 0); g.lineTo(x, ARENA_HEIGHT); }
+        for (let y = 0; y <= ARENA_HEIGHT; y += 500) { g.moveTo(0, y); g.lineTo(ARENA_WIDTH, y); }
         g.strokePath();
 
         g.lineStyle(4, 0x9b59b6, 0.8);
@@ -161,14 +174,19 @@ class GameScene extends Phaser.Scene {
 
     createEnergyFragments() {
         for (let i = 0; i < ENERGY_FRAGMENTS_COUNT; i++) {
-            this.energyFragments.push({
-                x: Phaser.Math.Between(100, ARENA_WIDTH - 100),
-                y: Phaser.Math.Between(100, ARENA_HEIGHT - 100),
-                value: Phaser.Math.Between(5, 20),
-            });
+            this.spawnEnergyFragment();
         }
         this.energyGraphics = this.add.graphics();
         this.energyGraphics.setDepth(5);
+    }
+
+    spawnEnergyFragment() {
+        return {
+            x: Phaser.Math.Between(100, ARENA_WIDTH - 100),
+            y: Phaser.Math.Between(100, ARENA_HEIGHT - 100),
+            value: Phaser.Math.Between(5, 20),
+            spawnedAt: this.time.now,
+        };
     }
 
     drawEnergyFragments() {
@@ -177,13 +195,10 @@ class GameScene extends Phaser.Scene {
 
         for (const frag of this.energyFragments) {
             const pulse = 1 + Math.sin(t + frag.x * 0.01 + frag.y * 0.01) * 0.15;
-
             this.energyGraphics.fillStyle(0x8b5cf6, 0.15 * pulse);
             this.energyGraphics.fillCircle(frag.x, frag.y, ENERGY_GLOW_RADIUS * pulse);
-
             this.energyGraphics.fillStyle(0xa78bfa, 0.4 * pulse);
             this.energyGraphics.fillCircle(frag.x, frag.y, ENERGY_RADIUS * pulse + 2);
-
             this.energyGraphics.fillStyle(0xffffff, 0.5 * pulse);
             this.energyGraphics.fillCircle(frag.x, frag.y, ENERGY_RADIUS * pulse);
         }
@@ -195,20 +210,29 @@ class GameScene extends Phaser.Scene {
 
         for (let i = this.energyFragments.length - 1; i >= 0; i--) {
             const frag = this.energyFragments[i];
-            const dx = px - frag.x;
-            const dy = py - frag.y;
-            if (Math.sqrt(dx * dx + dy * dy) < ENERGY_PICKUP_RANGE) {
+            if (Phaser.Math.Distance.Between(px, py, frag.x, frag.y) < ENERGY_PICKUP_RANGE) {
                 this.collectFragment(i);
             }
         }
     }
 
-    collectFragment(index) {
+    collectFragment(index, collector) {
         const frag = this.energyFragments[index];
         this.energyFragments.splice(index, 1);
-        this.collectFlashTimer = 200;
 
-        let exp = this.player.getData('exp') + frag.value;
+        this.energyRespawnQueue.push({
+            delay: Phaser.Math.Between(ENERGY_RESPAWN_DELAY.min, ENERGY_RESPAWN_DELAY.max),
+            timer: 0,
+        });
+
+        if (collector === this.player || !collector) {
+            this.collectFlashTimer = 200;
+            this.addExp(frag.value);
+        }
+    }
+
+    addExp(amount) {
+        let exp = this.player.getData('exp') + amount;
         let level = this.player.getData('level');
         let expToNext = this.player.getData('expToNext');
 
@@ -216,10 +240,8 @@ class GameScene extends Phaser.Scene {
             exp -= expToNext;
             level++;
             expToNext = XP_BASE + (level - 1) * XP_SCALE;
-
-            const maxHp = this.player.getData('maxHp') + 10;
-            this.player.setData('maxHp', maxHp);
-            this.player.setData('hp', maxHp);
+            this.player.setData('maxHp', this.player.getData('maxHp') + 10);
+            this.player.setData('hp', this.player.getData('maxHp'));
             this.player.setData('damage', this.player.getData('damage') + 2);
             this.player.setData('speed', Math.min(300, this.player.getData('speed') + 5));
             this.levelUpTimer = 500;
@@ -232,10 +254,7 @@ class GameScene extends Phaser.Scene {
     }
 
     createPlayer() {
-        const cx = ARENA_WIDTH / 2;
-        const cy = ARENA_HEIGHT / 2;
         const s = (PLAYER_RADIUS + 8) * 2;
-
         const gfx = this.make.graphics({ add: false });
         const mid = s / 2;
         gfx.fillStyle(0xffffff, 0.12);
@@ -247,136 +266,107 @@ class GameScene extends Phaser.Scene {
         gfx.generateTexture('player_tex', s, s);
         gfx.destroy();
 
-        this.player = this.physics.add.sprite(cx, cy, 'player_tex');
+        this.player = this.physics.add.sprite(ARENA_WIDTH / 2, ARENA_HEIGHT / 2, 'player_tex');
         this.player.body.setCircle(PLAYER_RADIUS, (s / 2) - PLAYER_RADIUS, (s / 2) - PLAYER_RADIUS);
         this.player.body.setCollideWorldBounds(true);
         this.player.setDepth(10);
-        this.player.setData('hp', 100);
-        this.player.setData('maxHp', 100);
-        this.player.setData('level', 1);
-        this.player.setData('exp', 0);
-        this.player.setData('expToNext', 100);
-        this.player.setData('damage', ATTACK_DAMAGE);
-        this.player.setData('speed', PLAYER_SPEED);
-        this.player.setData('kills', 0);
+        this.player.setData('hp', 100).setData('maxHp', 100).setData('level', 1);
+        this.player.setData('exp', 0).setData('expToNext', 100);
+        this.player.setData('damage', ATTACK_DAMAGE).setData('speed', PLAYER_SPEED).setData('kills', 0);
 
-        this.playerLabel = this.add.text(cx, cy - PLAYER_RADIUS - 14, playerData?.first_name || 'Player', {
-            fontSize: '13px', color: '#ffffff', fontFamily: 'Arial',
-            stroke: '#000000', strokeThickness: 3,
-        }).setOrigin(0.5).setDepth(11);
+        this.playerLabel = this.add.text(ARENA_WIDTH / 2, ARENA_HEIGHT / 2 - PLAYER_RADIUS - 14,
+            playerData?.first_name || 'Player', {
+                fontSize: '13px', color: '#ffffff', fontFamily: 'Arial',
+                stroke: '#000000', strokeThickness: 3,
+            }).setOrigin(0.5).setDepth(11);
 
         this.updateUI();
     }
 
     createAttackCone() {
-        this.attackCone = this.add.graphics();
-        this.attackCone.setDepth(9);
-
-        this.attackFlash = this.add.graphics();
-        this.attackFlash.setDepth(9);
+        this.attackCone = this.add.graphics().setDepth(9);
+        this.attackFlash = this.add.graphics().setDepth(9);
     }
 
-    drawCone(graphics, px, py, angle, alpha) {
-        graphics.clear();
-        const halfAngle = ATTACK_ANGLE / 2;
-
-        graphics.fillStyle(0x9b59b6, alpha * 0.12);
-        graphics.beginPath();
-        graphics.moveTo(px, py);
-        graphics.lineTo(
-            px + Math.cos(angle - halfAngle) * ATTACK_RANGE,
-            py + Math.sin(angle - halfAngle) * ATTACK_RANGE
-        );
-        graphics.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
-        graphics.closePath();
-        graphics.fillPath();
-
-        graphics.lineStyle(2, 0x9b59b6, alpha * 0.35);
-        graphics.beginPath();
-        graphics.arc(px, py, ATTACK_RANGE, angle - halfAngle, angle + halfAngle, false);
-        graphics.strokePath();
-
-        graphics.lineStyle(1, 0x9b59b6, alpha * 0.25);
-        graphics.beginPath();
-        graphics.moveTo(px, py);
-        graphics.lineTo(px + Math.cos(angle - halfAngle) * ATTACK_RANGE, py + Math.sin(angle - halfAngle) * ATTACK_RANGE);
-        graphics.moveTo(px, py);
-        graphics.lineTo(px + Math.cos(angle + halfAngle) * ATTACK_RANGE, py + Math.sin(angle + halfAngle) * ATTACK_RANGE);
-        graphics.strokePath();
+    drawCone(g, px, py, angle, alpha) {
+        g.clear();
+        const ha = ATTACK_ANGLE / 2;
+        g.fillStyle(0x9b59b6, alpha * 0.12);
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(px + Math.cos(angle - ha) * ATTACK_RANGE, py + Math.sin(angle - ha) * ATTACK_RANGE);
+        g.arc(px, py, ATTACK_RANGE, angle - ha, angle + ha, false);
+        g.closePath();
+        g.fillPath();
+        g.lineStyle(2, 0x9b59b6, alpha * 0.35);
+        g.beginPath();
+        g.arc(px, py, ATTACK_RANGE, angle - ha, angle + ha, false);
+        g.strokePath();
+        g.lineStyle(1, 0x9b59b6, alpha * 0.25);
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(px + Math.cos(angle - ha) * ATTACK_RANGE, py + Math.sin(angle - ha) * ATTACK_RANGE);
+        g.moveTo(px, py);
+        g.lineTo(px + Math.cos(angle + ha) * ATTACK_RANGE, py + Math.sin(angle + ha) * ATTACK_RANGE);
+        g.strokePath();
     }
 
-    drawFlash(graphics, px, py, angle, progress) {
-        graphics.clear();
-        const halfAngle = ATTACK_ANGLE / 2;
+    drawFlash(g, px, py, angle, progress) {
+        g.clear();
+        const ha = ATTACK_ANGLE / 2;
         const alpha = 1 - progress;
         const r = ATTACK_RANGE * (1 + progress * 0.3);
-
-        graphics.fillStyle(0xffffff, alpha * 0.4);
-        graphics.beginPath();
-        graphics.moveTo(px, py);
-        graphics.lineTo(
-            px + Math.cos(angle - halfAngle) * r,
-            py + Math.sin(angle - halfAngle) * r
-        );
-        graphics.arc(px, py, r, angle - halfAngle, angle + halfAngle, false);
-        graphics.closePath();
-        graphics.fillPath();
-
-        graphics.lineStyle(3, 0xffffff, alpha * 0.6);
-        graphics.beginPath();
-        graphics.arc(px, py, r, angle - halfAngle, angle + halfAngle, false);
-        graphics.strokePath();
+        g.fillStyle(0xffffff, alpha * 0.4);
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(px + Math.cos(angle - ha) * r, py + Math.sin(angle - ha) * r);
+        g.arc(px, py, r, angle - ha, angle + ha, false);
+        g.closePath();
+        g.fillPath();
+        g.lineStyle(3, 0xffffff, alpha * 0.6);
+        g.beginPath();
+        g.arc(px, py, r, angle - ha, angle + ha, false);
+        g.strokePath();
     }
 
     performAttack() {
-        const px = this.player.x;
-        const py = this.player.y;
+        const px = this.player.x, py = this.player.y;
         const dmg = this.player.getData('damage');
-
         this.flashTimer = ATTACK_FLASH_DURATION;
 
         for (let i = this.enemyTargets.length - 1; i >= 0; i--) {
-            const target = this.enemyTargets[i];
-            if (!target.active || !target.getData('alive')) continue;
-
-            const dx = target.x - px;
-            const dy = target.y - py;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            if (dist > ATTACK_RANGE) continue;
-
-            let angleToTarget = Math.atan2(dy, dx);
-            let diff = angleToTarget - this.facingAngle;
+            const t = this.enemyTargets[i];
+            if (!t.active || !t.getData('alive')) continue;
+            const dx = t.x - px, dy = t.y - py;
+            if (Math.sqrt(dx * dx + dy * dy) > ATTACK_RANGE) continue;
+            let diff = Math.atan2(dy, dx) - this.facingAngle;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
-
             if (Math.abs(diff) <= ATTACK_ANGLE / 2) {
-                const newHp = target.getData('hp') - dmg;
-                target.setData('hp', newHp);
+                const newHp = t.getData('hp') - dmg;
+                t.setData('hp', newHp);
                 if (newHp <= 0) {
-                    target.setData('alive', false);
+                    t.setData('alive', false);
+                    this.player.setData('kills', this.player.getData('kills') + 1);
+                    this.updateUI();
+                    this.dropEnergyOnDeath(t.x, t.y);
                 }
             }
         }
     }
 
     isInAttackCone(x, y) {
-        const dx = x - this.player.x;
-        const dy = y - this.player.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > ATTACK_RANGE) return false;
-
-        let angleToTarget = Math.atan2(dy, dx);
-        let diff = angleToTarget - this.facingAngle;
+        const dx = x - this.player.x, dy = y - this.player.y;
+        if (Math.sqrt(dx * dx + dy * dy) > ATTACK_RANGE) return false;
+        let diff = Math.atan2(dy, dx) - this.facingAngle;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
-
         return Math.abs(diff) <= ATTACK_ANGLE / 2;
     }
 
     addTarget(sprite) {
-        if (!sprite.getData('hp')) sprite.setData('hp', 50);
-        if (!sprite.getData('alive')) sprite.setData('alive', true);
+        sprite.setData('hp', sprite.getData('hp') || 50);
+        sprite.setData('alive', true);
         this.enemyTargets.push(sprite);
     }
 
@@ -385,18 +375,228 @@ class GameScene extends Phaser.Scene {
         if (idx !== -1) this.enemyTargets.splice(idx, 1);
     }
 
+    dropEnergyOnDeath(x, y) {
+        const count = Phaser.Math.Between(2, 4);
+        for (let i = 0; i < count; i++) {
+            this.energyFragments.push({
+                x: x + Phaser.Math.Between(-20, 20),
+                y: y + Phaser.Math.Between(-20, 20),
+                value: Phaser.Math.Between(3, 8),
+            });
+        }
+    }
+
+    spawnBot() {
+        const bot = {};
+
+        const used = new Set();
+        for (const b of this.bots) if (b.name) used.add(b.name);
+        let name;
+        const available = BOT_NAMES.filter(n => !used.has(n));
+        if (available.length > 0) {
+            name = available[Math.floor(Math.random() * available.length)];
+        } else {
+            name = `Shadow ${Math.floor(Math.random() * 1000)}`;
+        }
+
+        const lvl = Phaser.Math.Between(1, Math.min(3, this.player.getData('level') + 1));
+
+        if (!this.textures.exists('bot_tex')) {
+            const s = (BOT_RADIUS + 6) * 2;
+            const gfx = this.make.graphics({ add: false });
+            const mid = s / 2;
+            gfx.fillStyle(0xffffff, 0.1);
+            gfx.fillCircle(mid, mid, BOT_RADIUS + 3);
+            gfx.fillStyle(BOT_COLOR, 1);
+            gfx.fillCircle(mid, mid, BOT_RADIUS);
+            gfx.fillStyle(0x991b1b, 1);
+            gfx.fillCircle(mid, mid, BOT_RADIUS - 5);
+            gfx.lineStyle(2, 0xffffff, 0.15);
+            gfx.strokeCircle(mid, mid, BOT_RADIUS - 1);
+            gfx.generateTexture('bot_tex', s, s);
+            gfx.destroy();
+        }
+
+        const s = (BOT_RADIUS + 6) * 2;
+        const x = Phaser.Math.Between(100, ARENA_WIDTH - 100);
+        const y = Phaser.Math.Between(100, ARENA_HEIGHT - 100);
+
+        const sprite = this.physics.add.sprite(x, y, 'bot_tex');
+        sprite.body.setCircle(BOT_RADIUS, (s / 2) - BOT_RADIUS, (s / 2) - BOT_RADIUS);
+        sprite.body.setCollideWorldBounds(true);
+        sprite.setDepth(5);
+        sprite.setData('hp', 30 + lvl * 20);
+        sprite.setData('maxHp', 30 + lvl * 20);
+        sprite.setData('alive', true);
+        sprite.setData('level', lvl);
+        sprite.setData('damage', 3 + lvl * 2);
+        sprite.setData('speed', 80 + lvl * 20);
+
+        const label = this.add.text(x, y - BOT_RADIUS - 12, name, {
+            fontSize: '11px', color: '#ff6b6b', fontFamily: 'Arial',
+            stroke: '#000000', strokeThickness: 2,
+        }).setOrigin(0.5).setDepth(6);
+
+        this.addTarget(sprite);
+
+        bot.sprite = sprite;
+        bot.label = label;
+        bot.name = name;
+        bot.aiTimer = Phaser.Math.Between(100, 500);
+        bot.attackTimer = 0;
+        bot.state = 'roam';
+        bot.targetX = x;
+        bot.targetY = y;
+
+        this.bots.push(bot);
+        return bot;
+    }
+
+    createBots() {
+        this.botGraphics = this.add.graphics().setDepth(6);
+
+        for (let i = 0; i < BOT_COUNT; i++) {
+            this.spawnBot();
+        }
+    }
+
+    respawnBot(bot) {
+        bot.sprite.setData('hp', bot.sprite.getData('maxHp'));
+        bot.sprite.setData('alive', true);
+        bot.sprite.setPosition(
+            Phaser.Math.Between(100, ARENA_WIDTH - 100),
+            Phaser.Math.Between(100, ARENA_HEIGHT - 100)
+        );
+        bot.sprite.setVelocity(0, 0);
+        bot.sprite.setAlpha(1);
+        bot.sprite.setVisible(true);
+        bot.aiTimer = Phaser.Math.Between(100, 500);
+        bot.state = 'roam';
+    }
+
+    updateBotAI(bot, delta) {
+        const s = bot.sprite;
+        if (!s.active || !s.getData('alive')) return;
+
+        bot.aiTimer -= delta;
+        if (bot.aiTimer > 0) return;
+
+        bot.aiTimer = Phaser.Math.Between(BOT_AI_INTERVAL.min, BOT_AI_INTERVAL.max);
+
+        const hp = s.getData('hp');
+        const maxHp = s.getData('maxHp');
+        const sx = s.x, sy = s.y;
+        const speed = s.getData('speed');
+
+        let nearestEnemy = null;
+        let nearestEnemyDist = Infinity;
+        let nearestEnergy = null;
+        let nearestEnergyDist = Infinity;
+
+        if (this.player.getData('alive')) {
+            const d = Phaser.Math.Distance.Between(sx, sy, this.player.x, this.player.y);
+            if (d < nearestEnemyDist) { nearestEnemyDist = d; nearestEnemy = this.player; }
+        }
+        for (const other of this.bots) {
+            if (other === bot || !other.sprite.getData('alive')) continue;
+            const d = Phaser.Math.Distance.Between(sx, sy, other.sprite.x, other.sprite.y);
+            if (d < nearestEnemyDist) { nearestEnemyDist = d; nearestEnemy = other.sprite; }
+        }
+
+        for (const frag of this.energyFragments) {
+            const d = Phaser.Math.Distance.Between(sx, sy, frag.x, frag.y);
+            if (d < nearestEnergyDist) { nearestEnergyDist = d; nearestEnergy = frag; }
+        }
+
+        bot.state = 'roam';
+        bot.targetX = sx + Phaser.Math.Between(-200, 200);
+        bot.targetY = sy + Phaser.Math.Between(-200, 200);
+
+        if (hp / maxHp < BOT_FLEE_HP_RATIO && nearestEnemy && nearestEnemyDist < 200) {
+            bot.state = 'flee';
+            const angle = Math.atan2(sy - nearestEnemy.y, sx - nearestEnemy.x);
+            bot.targetX = sx + Math.cos(angle) * 300;
+            bot.targetY = sy + Math.sin(angle) * 300;
+        } else if (nearestEnemy && nearestEnemyDist < BOT_ATTACK_RANGE) {
+            bot.state = 'attack';
+            bot.targetX = nearestEnemy.x;
+            bot.targetY = nearestEnemy.y;
+            bot.attackTimer -= delta;
+            if (bot.attackTimer <= 0) {
+                bot.attackTimer = BOT_ATTACK_COOLDOWN;
+                if (nearestEnemy.getData('alive')) {
+                    const nhp = nearestEnemy.getData('hp') - s.getData('damage');
+                    nearestEnemy.setData('hp', nhp);
+                    if (nhp <= 0) {
+                        nearestEnemy.setData('alive', false);
+                        if (nearestEnemy === this.player) {
+                            this.dropEnergyOnDeath(sx, sy);
+                        }
+                    }
+                }
+            }
+        } else if (nearestEnergy && nearestEnergyDist < BOT_SEEK_RANGE) {
+            bot.state = 'seek';
+            bot.targetX = nearestEnergy.x;
+            bot.targetY = nearestEnergy.y;
+        }
+
+        bot.targetX = Phaser.Math.Clamp(bot.targetX, 50, ARENA_WIDTH - 50);
+        bot.targetY = Phaser.Math.Clamp(bot.targetY, 50, ARENA_HEIGHT - 50);
+
+        const angle = Math.atan2(bot.targetY - sy, bot.targetX - sx);
+        s.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+        s.setRotation(angle + Math.PI / 2);
+    }
+
+    updateBotEnergyPickup(bot) {
+        const s = bot.sprite;
+        if (!s.getData('alive')) return;
+
+        for (let i = this.energyFragments.length - 1; i >= 0; i--) {
+            const frag = this.energyFragments[i];
+            if (Phaser.Math.Distance.Between(s.x, s.y, frag.x, frag.y) < ENERGY_PICKUP_RANGE) {
+                this.energyFragments.splice(i, 1);
+                this.energyRespawnQueue.push({
+                    delay: Phaser.Math.Between(ENERGY_RESPAWN_DELAY.min, ENERGY_RESPAWN_DELAY.max),
+                    timer: 0,
+                });
+                let exp = s.getData('exp') || 0;
+                exp += frag.value;
+                s.setData('exp', exp);
+                break;
+            }
+        }
+    }
+
+    drawBotBars() {
+        this.botGraphics.clear();
+
+        for (const bot of this.bots) {
+            const s = bot.sprite;
+            if (!s.getData('alive')) continue;
+
+            const x = s.x, y = s.y - BOT_RADIUS - 8;
+            const hp = s.getData('hp'), maxHp = s.getData('maxHp');
+            const w = 30, h = 4;
+            const pct = Math.max(0, hp / maxHp);
+
+            this.botGraphics.fillStyle(0x000000, 0.6);
+            this.botGraphics.fillRect(x - w / 2 - 1, y - 1, w + 2, h + 2);
+            this.botGraphics.fillStyle(0xdc2626, 1);
+            this.botGraphics.fillRect(x - w / 2, y, w * pct, h);
+
+            bot.label.setPosition(s.x, s.y - BOT_RADIUS - 14);
+        }
+    }
+
     createJoystick() {
         const x = 100;
         const y = this.scale.height - 100;
 
-        this.joystickBase = this.add.graphics();
-        this.joystickBase.setDepth(100);
-        this.joystickBase.setScrollFactor(0);
+        this.joystickBase = this.add.graphics().setDepth(100).setScrollFactor(0);
+        this.joystickThumb = this.add.graphics().setDepth(101).setScrollFactor(0);
         this.drawJoystickBase(x, y);
-
-        this.joystickThumb = this.add.graphics();
-        this.joystickThumb.setDepth(101);
-        this.joystickThumb.setScrollFactor(0);
         this.drawJoystickThumb(x, y);
 
         this.joystick = { x, y };
@@ -417,20 +617,15 @@ class GameScene extends Phaser.Scene {
     }
 
     onPointerDown(pointer) {
-        const dx = pointer.x - this.joystick.x;
-        const dy = pointer.y - this.joystick.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < JOYSTICK_BASE_RADIUS + 40) {
+        const dx = pointer.x - this.joystick.x, dy = pointer.y - this.joystick.y;
+        if (Math.sqrt(dx * dx + dy * dy) < JOYSTICK_BASE_RADIUS + 40) {
             this.joystickActive = true;
             this.updateJoystick(pointer);
         }
     }
 
     onPointerMove(pointer) {
-        if (this.joystickActive && pointer.isDown) {
-            this.updateJoystick(pointer);
-        }
+        if (this.joystickActive && pointer.isDown) this.updateJoystick(pointer);
     }
 
     onPointerUp() {
@@ -441,49 +636,28 @@ class GameScene extends Phaser.Scene {
     }
 
     updateJoystick(pointer) {
-        let dx = pointer.x - this.joystick.x;
-        let dy = pointer.y - this.joystick.y;
+        let dx = pointer.x - this.joystick.x, dy = pointer.y - this.joystick.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const maxDist = JOYSTICK_BASE_RADIUS;
-
         let clampedDist = Math.min(dist, maxDist);
-        let nx = dx / (dist || 1);
-        let ny = dy / (dist || 1);
-
-        if (dist > maxDist) {
-            dx = nx * maxDist;
-            dy = ny * maxDist;
-        }
-
+        let nx = dx / (dist || 1), ny = dy / (dist || 1);
+        if (dist > maxDist) { dx = nx * maxDist; dy = ny * maxDist; }
         this.drawJoystickThumb(this.joystick.x + dx, this.joystick.y + dy);
-
-        const force = clampedDist / maxDist;
-        this.joystickDir = { x: nx * force, y: ny * force };
-
-        if (dist > 5) {
-            this.facingAngle = Math.atan2(dy, dx);
-        }
+        this.joystickDir = { x: nx * (clampedDist / maxDist), y: ny * (clampedDist / maxDist) };
+        if (dist > 5) this.facingAngle = Math.atan2(dy, dx);
     }
 
     updateUI() {
-        const hp = this.player.getData('hp');
-        const maxHp = this.player.getData('maxHp');
-        const level = this.player.getData('level');
-        const exp = this.player.getData('exp');
-        const expToNext = this.player.getData('expToNext');
-        const kills = this.player.getData('kills');
+        const h = this.player.getData('hp'), m = this.player.getData('maxHp');
+        const l = this.player.getData('level'), e = this.player.getData('exp'), en = this.player.getData('expToNext');
+        const k = this.player.getData('kills');
 
-        document.getElementById('player-level').textContent = `Lv. ${level}`;
-
-        const hpPct = Math.max(0, hp / maxHp * 100);
-        document.getElementById('hp-fill').style.width = `${hpPct}%`;
-        document.getElementById('hp-text').textContent = `${Math.max(0, hp)}/${maxHp}`;
-
-        const expPct = Math.min(100, exp / expToNext * 100);
-        document.getElementById('exp-fill').style.width = `${expPct}%`;
-        document.getElementById('exp-text').textContent = `${exp}/${expToNext}`;
-
-        document.getElementById('kill-counter').textContent = `Kills: ${kills}`;
+        document.getElementById('player-level').textContent = `Lv. ${l}`;
+        document.getElementById('hp-fill').style.width = `${Math.max(0, h / m * 100)}%`;
+        document.getElementById('hp-text').textContent = `${Math.max(0, h)}/${m}`;
+        document.getElementById('exp-fill').style.width = `${Math.min(100, e / en * 100)}%`;
+        document.getElementById('exp-text').textContent = `${e}/${en}`;
+        document.getElementById('kill-counter').textContent = `Kills: ${k}`;
     }
 
     update(time, delta) {
@@ -492,25 +666,19 @@ class GameScene extends Phaser.Scene {
         this.playerLabel.setPosition(this.player.x, this.player.y - PLAYER_RADIUS - 14);
 
         const speed = this.player.getData('speed');
-        this.player.setVelocity(
-            this.joystickDir.x * speed,
-            this.joystickDir.y * speed
-        );
-
+        this.player.setVelocity(this.joystickDir.x * speed, this.joystickDir.y * speed);
         if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
             this.player.setRotation(this.facingAngle + Math.PI / 2);
         }
 
-        const px = this.player.x;
-        const py = this.player.y;
-        const angle = this.facingAngle;
+        const px = this.player.x, py = this.player.y;
 
-        this.drawCone(this.attackCone, px, py, angle, 1);
+        this.drawCone(this.attackCone, px, py, this.facingAngle, 1);
 
         if (this.flashTimer > 0) {
             this.flashTimer -= delta;
-            const progress = 1 - this.flashTimer / ATTACK_FLASH_DURATION;
-            this.drawFlash(this.attackFlash, px, py, angle, Math.min(1, Math.max(0, progress)));
+            const p = 1 - this.flashTimer / ATTACK_FLASH_DURATION;
+            this.drawFlash(this.attackFlash, px, py, this.facingAngle, Math.min(1, Math.max(0, p)));
         } else {
             this.attackFlash.clear();
         }
@@ -538,19 +706,42 @@ class GameScene extends Phaser.Scene {
             this.energyGraphics.fillStyle(0x9b59b6, p * 0.3);
             this.energyGraphics.fillCircle(px, py, r);
         }
+
+        for (let i = this.energyRespawnQueue.length - 1; i >= 0; i--) {
+            this.energyRespawnQueue[i].timer += delta;
+            if (this.energyRespawnQueue[i].timer >= this.energyRespawnQueue[i].delay) {
+                this.energyFragments.push(this.spawnEnergyFragment());
+                this.energyRespawnQueue.splice(i, 1);
+            }
+        }
+
+        for (const bot of this.bots) {
+            if (!bot.sprite.getData('alive')) {
+                bot.respawnTimer -= delta;
+                if (bot.respawnTimer <= 0) {
+                    this.respawnBot(bot);
+                }
+                continue;
+            }
+            this.updateBotAI(bot, delta);
+            this.updateBotEnergyPickup(bot);
+        }
+        this.drawBotBars();
+
+        for (const bot of this.bots) {
+            if (!bot.sprite.getData('alive') && bot.respawnTimer <= 0) {
+                bot.respawnTimer = Phaser.Math.Between(BOT_RESPAWN_DELAY.min, BOT_RESPAWN_DELAY.max);
+            }
+        }
     }
 
     resize() {
-        const w = this.scale.width;
-        const h = this.scale.height;
+        const w = this.scale.width, h = this.scale.height;
         this.cameras.main.setSize(w, h);
-
         if (this.joystick) {
             this.joystick.y = h - 100;
             this.drawJoystickBase(this.joystick.x, this.joystick.y);
-            if (!this.joystickActive) {
-                this.drawJoystickThumb(this.joystick.x, this.joystick.y);
-            }
+            if (!this.joystickActive) this.drawJoystickThumb(this.joystick.x, this.joystick.y);
         }
     }
 }
