@@ -40,10 +40,16 @@ def init_db():
 def save_player(player_id: str, name: str, telegram_id: str = None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT OR REPLACE INTO players (id, name, telegram_id) VALUES (?, ?, ?)",
-        (player_id, name, telegram_id),
-    )
+    if telegram_id:
+        cursor.execute(
+            "INSERT OR REPLACE INTO players (id, name, telegram_id) VALUES (?, ?, ?)",
+            (player_id, name, telegram_id),
+        )
+    else:
+        cursor.execute(
+            "INSERT INTO players (id, name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name",
+            (player_id, name),
+        )
     conn.commit()
     conn.close()
 

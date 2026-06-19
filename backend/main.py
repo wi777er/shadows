@@ -1,6 +1,7 @@
 import os
 import math
 import asyncio
+import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,6 @@ app = FastAPI(title="Shadow Survivor")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,6 +42,9 @@ async def startup():
     init_db()
     for mid in maps:
         asyncio.create_task(state_pusher(mid))
+
+
+@app.get("/")
 async def index():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
@@ -58,7 +61,9 @@ async def config():
 
 @app.get("/{filename:path}")
 async def static_files(filename: str):
-    file_path = os.path.join(FRONTEND_DIR, filename)
+    file_path = os.path.abspath(os.path.join(FRONTEND_DIR, filename))
+    if not file_path.startswith(os.path.abspath(FRONTEND_DIR)):
+        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
     if os.path.isfile(file_path):
         return FileResponse(file_path)
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
@@ -112,7 +117,7 @@ async def state_pusher(map_id: str):
         if not game or not game.state.players:
             continue
         state = game.get_public_state()
-        await manager.broadcast_to_map(map_id, {"type": "state", **state})
+        await manager.broadcast_to_map(map_id, {"type": "state", **state, "ts": time.time()})
 
 
 @app.websocket("/ws/{player_id}")
@@ -120,7 +125,7 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str, name: str = Q
     await manager.connect(player_id, websocket)
     if not name:
         name = f"Player_{player_id[:6]}"
-    name = name[:20]
+    name = name.encode('utf-8')[:20].decode('utf-8', 'ignore')
     current_map = "map_1"
     game = maps[current_map]
     game.add_player(player_id, name)
@@ -132,9 +137,14 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str, name: str = Q
 
     await manager.send(player_id, {"type": "state", "map_id": current_map, **game.get_public_state()})
 
+    last_attack_time = 0
+
     try:
         while True:
-            data = await websocket.receive_json()
+            try:
+                data = await websocket.receive_json()
+            except Exception:
+                continue
             action = data.get("action")
 
             if action == "move":
@@ -145,15 +155,19 @@ async def websocket_endpoint(websocket: WebSocket, player_id: str, name: str = Q
                     game.move_player(player_id, x, y, angle)
 
             elif action == "attack":
+                now = time.time()
+                if now - last_attack_time < 0.7:
+                    continue
                 target_id = data.get("target_id")
                 if target_id:
-                    # Track attacker position for knockback direction
                     p = game.state.players.get(player_id)
                     if p:
-                        p.x = data.get("x", p.x)
-                        p.y = data.get("y", p.y)
+                        angle = data.get("angle", getattr(p, 'angle', 0))
+                        if isinstance(angle, (int, float)):
+                            p.angle = angle
                     result = game.attack_player(player_id, target_id)
                     if result:
+                        last_attack_time = now
                         await manager.broadcast_to_map(current_map, {
                             "type": "damage", **result, "map_id": current_map,
                         })

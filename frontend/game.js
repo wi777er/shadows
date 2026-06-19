@@ -127,7 +127,7 @@ function startPhaser() {
 
     try {
         game = new Phaser.Game({
-            type: Phaser.CANVAS,
+            type: Phaser.AUTO,
             width: window.innerWidth,
             height: window.innerHeight,
             parent: 'game-container',
@@ -169,7 +169,6 @@ class GameScene extends Phaser.Scene {
         this.bots = [];
         this.botGraphics = null;
         this.energyRespawnQueue = [];
-        this.botNamesUsed = [];
         this.botGroup = null;
         this.playerRespawnTimer = 0;
         this.stunTimer = 0;
@@ -180,6 +179,8 @@ class GameScene extends Phaser.Scene {
         this.wsReconnectTimer = 0;
         this.sendMoveTimer = 0;
         this.upgradeTimer = null;
+        this.joystickPointerId = null;
+        this.lastSentAngle = 0;
     }
 
     create() {
@@ -198,6 +199,10 @@ class GameScene extends Phaser.Scene {
         document.querySelectorAll('.upgrade-btn').forEach(btn => {
             btn.onclick = () => this.applyUpgrade(btn.dataset.stat);
         });
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+        if (this.scale) this.scale.on('resize', this.resize, this);
 
         hideLoading();
         this.showJoinBattle();
@@ -360,15 +365,11 @@ class GameScene extends Phaser.Scene {
                 // Check if remote player was attacking us — add to targets
                 this.addTarget(sprite);
 
-                rp = { sprite, label, id: pid };
+                rp = { sprite, label, id: pid, prevPos: { x, y }, targetPos: { x, y }, interpT: 1 };
                 this.remotePlayers[pid] = rp;
             } else {
                 rp.sprite.setData('hp', pd.hp !== undefined ? pd.hp : 100).setData('maxHp', pd.max_hp !== undefined ? pd.max_hp : 100);
                 rp.sprite.setData('alive', pd.alive !== false);
-                if (pd.alive === false && rp.sprite.getData('alive') !== false) {
-                    rp.sprite.setVisible(false);
-                    if (rp.sprite.body) rp.sprite.body.enable = false;
-                }
             }
 
             rp = this.remotePlayers[pid];
@@ -383,8 +384,10 @@ class GameScene extends Phaser.Scene {
             rp.sprite.setVisible(true);
             if (rp.sprite.body) rp.sprite.body.enable = true;
             rp.label.setVisible(true);
-            rp.sprite.setPosition(pdVal.x, pdVal.y);
-            rp.label.setPosition(pdVal.x, pdVal.y - PLAYER_RADIUS - 14);
+            // Set interpolation target instead of snapping position
+            rp.prevPos = { x: rp.sprite.x, y: rp.sprite.y };
+            rp.targetPos = { x: pdVal.x, y: pdVal.y };
+            rp.interpT = 0;
         }
     }
 
@@ -437,6 +440,8 @@ class GameScene extends Phaser.Scene {
     }
 
     respawnPlayer() {
+        this.stunTimer = 0;
+        this.joystickDir = { x: 0, y: 0 };
         this.player.setData('alive', true);
         this.player.setData('hp', this.player.getData('maxHp'));
         this.player.setPosition(
@@ -714,12 +719,12 @@ class GameScene extends Phaser.Scene {
                 const newHp = t.getData('hp') - dmg;
                 t.setData('hp', newHp);
                 this.damageEffect(t, this.player);
-                if (newHp <= 0) {
+                    if (newHp <= 0) {
                     t.setData('alive', false);
                     t.setVisible(false);
                     t.body.enable = false;
                     const deadBot = this.bots.find(b => b.sprite === t);
-                    if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
+                    if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = Phaser.Math.Between(BOT_RESPAWN_DELAY.min, BOT_RESPAWN_DELAY.max); }
                     this.player.setData('kills', this.player.getData('kills') + 1);
                     this.addExp(XP_PER_KILL, this.player);
                     this.updateUI();
@@ -819,6 +824,7 @@ class GameScene extends Phaser.Scene {
         bot.name = name;
         bot.aiTimer = Phaser.Math.Between(100, 500);
         bot.attackTimer = Phaser.Math.Between(0, BOT_ATTACK_COOLDOWN);
+        bot.respawnTimer = 0;
         bot.state = 'roam';
         bot.targetX = x;
         bot.targetY = y;
@@ -904,7 +910,7 @@ class GameScene extends Phaser.Scene {
                             target.setVisible(false);
                             if (target.body) target.body.enable = false;
                             const deadBot = this.bots.find(b => b.sprite === target);
-                            if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = 0; }
+                    if (deadBot) { deadBot.label.setVisible(false); deadBot.respawnTimer = Phaser.Math.Between(BOT_RESPAWN_DELAY.min, BOT_RESPAWN_DELAY.max); }
                             this.botAddExp(s, XP_PER_KILL);
                             this.dropEnergyOnDeath(target.x, target.y);
                         }
@@ -1048,7 +1054,9 @@ class GameScene extends Phaser.Scene {
     }
 
     onPointerDown(pointer) {
+        if (this.joystickPointerId !== null) return;
         if (!this.player || !this.player.getData('alive') || pointer.y < 80) return;
+        this.joystickPointerId = pointer.id;
         this.joystick.x = pointer.x;
         this.joystick.y = pointer.y;
         this.drawJoystickBase(pointer.x, pointer.y);
@@ -1060,7 +1068,9 @@ class GameScene extends Phaser.Scene {
         if (this.joystickActive && pointer.isDown) this.updateJoystick(pointer);
     }
 
-    onPointerUp() {
+    onPointerUp(pointer) {
+        if (pointer.id !== this.joystickPointerId) return;
+        this.joystickPointerId = null;
         this.joystickActive = false;
         this.joystickDir = { x: 0, y: 0 };
         if (this.player && this.player.body) this.player.setVelocity(0, 0);
@@ -1077,7 +1087,7 @@ class GameScene extends Phaser.Scene {
         if (dist > maxDist) { dx = nx * maxDist; dy = ny * maxDist; }
         this.joystickThumb.clear();
         this.drawJoystickThumb(this.joystick.x + dx, this.joystick.y + dy);
-        if (dist > 5) {
+        if (dist > 15) {
             this.joystickDir = { x: nx * (clampedDist / maxDist), y: ny * (clampedDist / maxDist) };
             this.facingAngle = Math.atan2(dy, dx);
         } else {
@@ -1100,6 +1110,20 @@ class GameScene extends Phaser.Scene {
 
     update(time, delta) {
         if (!this.player) return;
+
+        // Keyboard input (desktop)
+        let kx = 0, ky = 0;
+        if (this.cursors && this.wasd) {
+            if (this.cursors.left.isDown || this.wasd.A.isDown) kx = -1;
+            if (this.cursors.right.isDown || this.wasd.D.isDown) kx = 1;
+            if (this.cursors.up.isDown || this.wasd.W.isDown) ky = -1;
+            if (this.cursors.down.isDown || this.wasd.S.isDown) ky = 1;
+        }
+        if (kx !== 0 || ky !== 0) {
+            const len = Math.sqrt(kx * kx + ky * ky);
+            this.joystickDir = { x: kx / len, y: ky / len };
+            this.facingAngle = Math.atan2(ky, kx);
+        }
 
         // Player death overlay visible — game still runs
         if (!this.player.getData('alive')) {
@@ -1149,8 +1173,10 @@ class GameScene extends Phaser.Scene {
             if (this.sendMoveTimer <= 0) {
                 this.sendMoveTimer = 50;
                 const px = this.player.x, py = this.player.y;
-                if (Math.abs(px - this.lastSentPos.x) > 5 || Math.abs(py - this.lastSentPos.y) > 5) {
+                const angleChanged = Math.abs(this.facingAngle - this.lastSentAngle) > 0.1;
+                if (Math.abs(px - this.lastSentPos.x) > 5 || Math.abs(py - this.lastSentPos.y) > 5 || angleChanged) {
                     this.lastSentPos = { x: px, y: py };
+                    this.lastSentAngle = this.facingAngle;
                     this.sendWs({ action: 'move', x: px, y: py, angle: this.facingAngle });
                 }
             }
@@ -1179,6 +1205,22 @@ class GameScene extends Phaser.Scene {
                 this.energyFragments.push(this.spawnEnergyFragment());
                 this.energyRespawnQueue.splice(i, 1);
             }
+        }
+
+        // Remote player interpolation
+        for (const rp of Object.values(this.remotePlayers)) {
+            if (rp.interpT < 1) {
+                rp.interpT += delta / 50;
+                if (rp.interpT > 1) rp.interpT = 1;
+                const t = rp.interpT;
+                rp.sprite.setPosition(
+                    rp.prevPos.x + (rp.targetPos.x - rp.prevPos.x) * t,
+                    rp.prevPos.y + (rp.targetPos.y - rp.prevPos.y) * t
+                );
+            } else {
+                rp.sprite.setPosition(rp.targetPos.x, rp.targetPos.y);
+            }
+            rp.label.setPosition(rp.sprite.x, rp.sprite.y - PLAYER_RADIUS - 14);
         }
 
         for (const bot of this.bots) {

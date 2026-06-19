@@ -34,6 +34,15 @@ class Game:
     def move_player(self, player_id: str, x: float, y: float, angle: float):
         p = self.state.players.get(player_id)
         if p and p.alive:
+            # Clamp speed to prevent teleport hacks
+            dx = x - p.x
+            dy = y - p.y
+            dist = math.sqrt(dx * dx + dy * dy)
+            max_move = getattr(p, 'speed', 200) * 0.12  # ~50ms * speed * safety margin
+            if dist > max_move and dist > 10:
+                ratio = max_move / dist
+                x = p.x + dx * ratio
+                y = p.y + dy * ratio
             p.x = max(0, min(ARENA_WIDTH, x))
             p.y = max(0, min(ARENA_HEIGHT, y))
             p.angle = angle
@@ -88,6 +97,6 @@ class Game:
             players_data[pid] = {
                 "x": p.x, "y": p.y, "hp": p.hp, "max_hp": p.max_hp,
                 "level": p.level, "kills": p.kills, "alive": p.alive,
-                "name": p.name, "damage": p.damage,
+                "name": p.name, "damage": p.damage, "angle": getattr(p, 'angle', 0),
             }
         return {"map_id": self.map_id, "players": players_data}
